@@ -709,35 +709,113 @@
       return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
         .toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
     }
-    function processPhrase(value) {
-      const phrase = String(value || '').trim().slice(0, 160);
-      if (!phrase) return;
-      text('heardText', 'Escuchado: '+phrase);
-      const q = normalized(phrase);
-      let msg;
-      if (/\b(holograma|holografico)\b/.test(q)) {
-        changeMode('holo'); msg=replies.holo;
-      } else if (/\b(humanoide|robot|personaje)\b/.test(q)) {
-        changeMode('human'); msg=replies.human;
-      } else if (/\b(esfera|orbita)\b/.test(q)) {
-        changeMode('orb'); msg=replies.orb;
-      } else if (/\b(salir de realidad mixta|salir ar|salir de ar)\b/.test(q)) {
-        window.presenciaAction('exit'); return;
-      } else if (/\b(ayuda|comandos|que podes hacer|que puedes hacer)\b/.test(q)) {
-        msg='Decí hola, humanoide, esfera, holograma, qué hora es o salir de realidad mixta.';
-      } else if (/\b(que hora|hora es)\b/.test(q)) {
-        msg='Son las '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
-            ' según el reloj de tu dispositivo.';
-      } else if (/\b(como estas|como va)\b/.test(q)) {
-        msg='Estoy listo para probar nuestra experiencia inmersiva.';
-      } else if (/\b(hola|buenas|buen dia)\b/.test(q)) {
-        msg='¡Hola! Me alegra poder acompañarte en realidad mixta.';
-      } else if (/\b(quien sos|quien eres)\b/.test(q)) {
-        msg='Soy PRESENCIA, un prototipo visual con respuestas programadas, sin una IA conectada todavía.';
-      } else {
-        msg='Escuché: '+phrase+'. Por ahora entiendo unas pocas órdenes. Decí ayuda para conocerlas.';
+    // La IA no está en Github Pages: se conecta a un puente privado en tu PC.
+    let brainUrl='',brainKey='',brainHistory=[],brainBusy=false;
+    function brainState(status,detail='') {
+      text('brainState',status+(detail?' — '+detail:''));
+      const el=document.getElementById('xrBrainState');
+      if(el)el.setAttribute('value',status.slice(0,45));
+    }
+    async function brainPost(path,body,url=brainUrl,key=brainKey) {
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),78000);
+      try {
+        const res=await fetch(url+path,{
+          method:'POST',mode:'cors',cache:'no-store',signal:controller.signal,
+          headers:{'Content-Type':'application/json','X-Presencia-Key':key},
+          body:JSON.stringify(body)
+        });
+        const data=await res.json().catch(()=>({error:'Respuesta inválida'}));
+        if(!res.ok)throw Error(data.error||('HTTP '+res.status));
+        return data;
+      }finally{clearTimeout(timer);}
+    }
+    async function connectBrain() {
+      const input=document.getElementById('brainUrl').value.trim();
+      const key=document.getElementById('brainKey').value.trim();
+      let u;
+      try {
+        u=new URL(input);
+        if(u.protocol!=='https:' || !u.hostname.endsWith('.trycloudflare.com')
+           || u.pathname!=='/' || u.search || u.hash || u.port)
+          throw Error('Usá la URL HTTPS terminada en .trycloudflare.com');
+        if(key.length<16)throw Error('La clave de la PC debe tener al menos 16 caracteres');
+      }catch(e){brainState('IA SIN CONEXION',e.message);return;}
+      brainState('IA CONECTANDO','Probando Ollama en la computadora');
+      try {
+        const data=await brainPost('/health',{},u.origin,key);
+        if(!data.ok)throw Error('El puente no respondió');
+        brainUrl=u.origin;brainKey=key;brainHistory=[];
+        document.getElementById('brainKey').value='';
+        brainState('IA CONECTADA',data.model||'');
+        notice('Cerebro local conectado. Ahora podés hacer preguntas abiertas.');
+      }catch(e){
+        brainUrl='';brainKey='';
+        brainState('IA SIN CONEXION',String(e.message||e).slice(0,90));
+        notice('No pude conectar con tu PC. Revisá Ollama, Python y cloudflared.');
       }
-      reply(msg);
+    }
+    function disconnectBrain() {
+      brainUrl='';brainKey='';brainHistory=[];brainBusy=false;
+      document.getElementById('brainKey').value='';
+      brainState('IA SIN CONEXION','Comandos programados');
+      notice('Desconecté la IA. La realidad mixta y los comandos siguen funcionando.');
+    }
+    async function askBrain(question) {
+      if(!brainUrl || !brainKey){
+        reply('Primero conectá el cerebro local en la pantalla de configuración.');
+        return;
+      }
+      if(brainBusy){notice('La IA todavía está respondiendo.');return;}
+      brainBusy=true;
+      const url=brainUrl,key=brainKey;
+      brainState('IA PENSANDO','Procesando en tu computadora');
+      notice('Consultando IA local: '+question);
+      stopVoiceOutput();
+      try {
+        const result=await brainPost('/chat',{text:question.slice(0,380),history:brainHistory.slice(-8)},url,key);
+        if(brainUrl!==url || brainKey!==key)return;
+        const answer=String(result.reply||'').trim().slice(0,800);
+        if(!answer)throw Error('Respuesta vacía');
+        brainHistory.push({role:'user',content:question.slice(0,380)});
+        brainHistory.push({role:'assistant',content:answer.slice(0,380)});
+        brainHistory=brainHistory.slice(-8);
+        brainState('IA CONECTADA',result.model||'');
+        notice(answer);
+        speak(answer.slice(0,220));
+      }catch(e){
+        brainState('IA ERROR',String(e.message||e).slice(0,65));
+        notice('La IA no pudo responder. Revisá la conexión y el modelo en tu PC.');
+      }finally{brainBusy=false;}
+    }
+    function localMode(phrase) {
+      const q=normalized(phrase);
+      const forms=[
+        [/^(?:(?:pon|activa|mostra|mostrar|cambia a|selecciona|modo|quiero ver)\s+(?:(?:el|la|un|una|modo)\s+)?)?(holograma|holografico)(?:\s+por favor)?$/,'holo'],
+        [/^(?:(?:pon|activa|mostra|mostrar|cambia a|selecciona|modo|quiero ver)\s+(?:(?:el|la|un|una|modo)\s+)?)?(humanoide|robot|personaje)(?:\s+por favor)?$/,'human'],
+        [/^(?:(?:pon|activa|mostra|mostrar|cambia a|selecciona|modo|quiero ver)\s+(?:(?:el|la|un|una|modo)\s+)?)?(esfera|orbita)(?:\s+por favor)?$/,'orb']
+      ];
+      for(const [re,mode] of forms)if(re.test(q))return mode;
+      return null;
+    }
+
+    function processPhrase(value) {
+      const phrase=String(value||'').trim().slice(0,360);
+      if(!phrase)return;
+      text('heardText','Escuchado: '+phrase);
+      const q=normalized(phrase);
+      const mode=localMode(phrase);
+      if(mode){changeMode(mode);reply(replies[mode]);return;}
+      if(/^(salir de realidad mixta|salir de ar|salir ar)$/.test(q)){
+        window.presenciaAction('exit');return;
+      }
+      if(brainUrl && brainKey){askBrain(phrase);return;}
+      if(/^(hola|buenas|buen dia)$/.test(q))
+        reply('Hola. Te escucho. Para preguntas abiertas conectá la IA desde el panel.');
+      else if(/^(ayuda|comandos)$/.test(q))
+        reply('Podés decir esfera, humanoide o holograma. Para conversar libremente conectá Ollama.');
+      else
+        reply('Escuché tu pregunta, pero todavía no hay una IA conectada para responderla.');
     }
     function errorMessage(code) {
       const known = {
@@ -1028,6 +1106,8 @@
       if (['holo','human','orb'].includes(command)) changeMode(command);
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
+    document.getElementById('brainConnect').addEventListener('click',connectBrain);
+    document.getElementById('brainDisconnect').addEventListener('click',disconnectBrain);
     const scene=document.querySelector('a-scene');
     scene.addEventListener('loaded',()=>notice('PRESENCIA v1.2 BETA: prepará voz y conectá IA local en el panel.'));
     function exitVisible(v) {
