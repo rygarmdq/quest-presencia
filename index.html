@@ -109,7 +109,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.9 · API: USD 0</span>
+    <span class="badge">Prototipo v0.9.1 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -119,10 +119,11 @@
       <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ + AUDIO</button>
       <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
       <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
+      <button onclick="presenciaAction('beep')">🔔 TEST SONIDO</button>
       <button onclick="presenciaAction('testvoice')">🔊 PROBAR RESPUESTA</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.9: reconocimiento Vosk + respuesta hablada en español (meSpeak). Primero prepará la voz.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.9.1: corregida la carga de voz. Probá primero TEST SONIDO, luego PREPARAR VOZ + AUDIO.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="voiceSupport">Comprobando compatibilidad...</p>
     <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
@@ -285,6 +286,12 @@
       <a-text value="PREPARAR VOZ + AUDIO" color="#deffff" width="1.25" align="center"
               position="0 0 .012"></a-text>
     </a-entity>
+    <a-entity id="soundTestPanel" position="1.03 2.48 -1.96">
+      <a-plane class="clickable" presencia-action="command: beep" width=".86" height=".19"
+               material="color:#30617b;side:double"></a-plane>
+      <a-text value="TEST SONIDO" color="#f0fffa" width="1.25" align="center"
+              position="0 0 .012"></a-text>
+    </a-entity>
     <a-entity id="voiceTestPanel" position="1.03 2.21 -1.96">
       <a-plane class="clickable" presencia-action="command: testvoice" width=".86" height=".19"
                material="color:#205d50;side:double"></a-plane>
@@ -362,7 +369,7 @@
     const MESPEAK_CONFIG=MESPEAK_BASE+'mespeak_config.json';
     const MESPEAK_VOICE=MESPEAK_BASE+'voices/es-la.json';
     let voiceAudioContext=null, voiceBufferSource=null, voiceReady=false, voiceLoading=null;
-    let voiceSequence=0;
+    let voiceSequence=0, voiceLastError='';
     function ttsStatus(msg) {
       text('ttsInfo','Salida de voz: '+msg);
       const a=document.getElementById('xrTtsState');
@@ -420,38 +427,95 @@
         document.head.appendChild(tag);
       });
     }
+
+    // El motor meSpeak v1.9.6 espera URL en loadConfig/loadVoice, NO objetos JSON.
+    // En v0.9 le pasábamos objetos: eso dejaba el motor sin configuración.
+    async function waitForVoice(check, timeoutMs, what) {
+      const started=Date.now();
+      while (Date.now()-started<timeoutMs) {
+        if (check()) return true;
+        await new Promise(resolve=>setTimeout(resolve,150));
+      }
+      throw new Error('Tiempo agotado: '+what);
+    }
     async function prepareVoiceOutput() {
-      if (voiceReady) {ttsStatus('español listo');return true;}
+      if (voiceReady) {ttsStatus('ESPAÑOL LISTO');return true;}
       if (voiceLoading) return voiceLoading;
-      ttsStatus('descargando motor en español...');
+      voiceLastError='';
+      ttsStatus('cargando motor TTS...');
       voiceLoading=(async()=>{
-        if (!window.meSpeak) {
+        if (!window.meSpeak || typeof window.meSpeak.speak!=='function') {
           try {
-            await loadSpeechScript(MESPEAK_BASE+'mespeak.js');
-          } catch(e) {
-            await loadSpeechScript('https://raw.githubusercontent.com/foxdog-studios/meSpeak/master/mespeak.js');
+            await loadSpeechScript(MESPEAK_BASE+'mespeak.js',26000);
+          } catch(first) {
+            try {
+              await loadSpeechScript('https://cdn.jsdelivr.net/gh/btopro/mespeak@master/mespeak.js',26000);
+            } catch(second) {
+              throw new Error('No descarga mespeak.js (red/CDN).');
+            }
           }
         }
-        if (!window.meSpeak || typeof meSpeak.speak !== 'function')
-          throw Error('El motor meSpeak no quedó disponible');
-        const [config,voice]=await Promise.all([
-          fetchJson(MESPEAK_CONFIG),
-          fetchJson(MESPEAK_VOICE)
-        ]);
-        meSpeak.loadConfig(config);
-        meSpeak.loadVoice(voice);
-        if (meSpeak.isVoiceLoaded && !meSpeak.isVoiceLoaded('es-la'))
-          throw Error('El español latinoamericano no se cargó');
+        if (!window.meSpeak || typeof window.meSpeak.speak!=='function') {
+          throw new Error('mespeak.js no pudo inicializarse.');
+        }
+        ttsStatus('cargando configuración...');
+        // La API del motor v1.9.6 realiza su propia solicitud XHR.
+        if (!meSpeak.isConfigLoaded()) {
+          meSpeak.loadConfig(MESPEAK_CONFIG);
+          await waitForVoice(()=>meSpeak.isConfigLoaded(),18000,'configuración mespeak_config.json');
+        }
+        ttsStatus('cargando voz es-la...');
+        if (!meSpeak.isVoiceLoaded('es-la')) {
+          let voiceFailure='';
+          meSpeak.loadVoice(MESPEAK_VOICE,(ok,info)=>{
+            if (!ok) voiceFailure=String(info||'error de archivo de voz');
+          });
+          await waitForVoice(()=>{
+            if (voiceFailure) throw new Error('Voz española: '+voiceFailure);
+            return meSpeak.isVoiceLoaded('es-la');
+          },15000,'archivo de voz es-la.json');
+        }
+        if (typeof meSpeak.setDefaultVoice==='function') meSpeak.setDefaultVoice('es-la');
         voiceReady=true;
+        voiceLastError='';
         ttsStatus('ESPAÑOL LISTO · PROBÁ RESPUESTA');
         return true;
-      })().catch(e=>{
+      })().catch(err=>{
         voiceReady=false;
-        voiceLoading=null;
-        ttsStatus('ERROR AL CARGAR · '+String(e.message||e).slice(0,45));
+        voiceLastError=String(err && (err.message||err) || 'causa no informada');
+        ttsStatus('ERROR: '+voiceLastError.slice(0,64));
+        text('ttsInfo','Error real del motor de voz: '+voiceLastError+'. Probá TEST SONIDO para aislar el problema.');
         return false;
+      }).finally(()=>{
+        voiceLoading=null;
       });
       return voiceLoading;
+    }
+    function testSpeaker() {
+      if (!unlockSpeaker() || !voiceAudioContext) {
+        notice('El visor no admite reproducir sonido con Web Audio o bloqueó el contexto.');
+        return;
+      }
+      try {
+        const ctx=voiceAudioContext;
+        const osc=ctx.createOscillator();
+        const amp=ctx.createGain();
+        osc.type='sine';
+        osc.frequency.setValueAtTime(440,ctx.currentTime);
+        osc.frequency.setValueAtTime(660,ctx.currentTime+0.16);
+        amp.gain.setValueAtTime(0.0001,ctx.currentTime);
+        amp.gain.exponentialRampToValueAtTime(0.08,ctx.currentTime+0.02);
+        amp.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.4);
+        osc.connect(amp);amp.connect(ctx.destination);
+        osc.start(ctx.currentTime+0.01);
+        osc.stop(ctx.currentTime+0.42);
+        osc.onended=()=>{osc.disconnect();amp.disconnect();};
+        ttsStatus('TEST TONO ENVIADO · estado '+ctx.state);
+        notice('Se envió un tono de prueba. Si no lo escuchás, revisá el volumen de las Quest.');
+      } catch(e) {
+        ttsStatus('ERROR TEST SONIDO: '+String(e.message||e).slice(0,42));
+        notice('No se pudo generar el sonido de prueba.');
+      }
     }
     function stopVoiceOutput() {
       voiceSequence++;
@@ -467,7 +531,7 @@
       if (!voiceReady) {
         const ok=await prepareVoiceOutput();
         if (!ok) {
-          ttsStatus('no disponible; respuesta en pantalla');
+          ttsStatus('ERROR: '+(voiceLastError||'motor no inicializado').slice(0,60));
           return;
         }
       }
@@ -480,7 +544,7 @@
         await voiceAudioContext.resume();
         if (seq!==voiceSequence) return;
         const raw=meSpeak.speak(String(message).slice(0,250),{
-          rawdata:'arraybuffer',voice:'es-la',speed:150,pitch:48,amplitude:90
+          rawdata:true,voice:'es-la',speed:150,pitch:48,amplitude:90
         });
         if (!raw) throw Error('No se generó el archivo WAV');
         let arr;
@@ -812,6 +876,7 @@
         prepareLocalSpeech();
         return;
       }
+      if (command==='beep') {testSpeaker();return;}
       if (command==='testvoice') {
         unlockSpeaker();
         reply('Hola. Ahora puedo hablarte en español, desde tu entorno de realidad mixta.',true);
@@ -836,7 +901,7 @@
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
     const scene=document.querySelector('a-scene');
-    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.9 lista. Prepará voz y audio; probá la respuesta hablada.'));
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.9.1 lista. Primero TEST SONIDO; luego PREPARAR VOZ + AUDIO.'));
     function exitVisible(v) {
       const button=document.getElementById('headExit');
       if (button) button.setAttribute('visible',!!v);
