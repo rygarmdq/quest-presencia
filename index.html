@@ -38,7 +38,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.2 · API: USD 0</span>
+    <span class="badge">Prototipo v0.3 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -48,7 +48,7 @@
       <button onclick="presenciaAction('hello')">Saludar 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.2: botón rojo SALIR AR dentro de la escena para regresar al navegador.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.3: corregidos los tamaños de avatar y holograma; controles separados del personaje.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. La voz depende del soporte de tu navegador.</p>
   </div>
@@ -68,10 +68,10 @@
                   geometry="primitive: ring; radiusInner: 0.005; radiusOuter: 0.009"
                   material="color: #8defff; shader: flat; opacity: 0.65"></a-entity>
         <!-- Botón de emergencia junto al campo de visión durante AR/VR. -->
-        <a-entity id="headExit" position=".34 .26 -.72" visible="false">
+        <a-entity id="headExit" position=".41 -.25 -.93" visible="false">
           <a-plane class="clickable" presencia-action="command: exit"
-                   width=".31" height=".14" material="color: #a52e43; shader: flat; side: double"></a-plane>
-          <a-text value="SALIR AR" align="center" width=".70"
+                   width=".23" height=".095" material="color: #a52e43; shader: flat; side: double"></a-plane>
+          <a-text value="SALIR AR" align="center" width=".51"
                   color="#ffffff" position="0 0 .009"></a-text>
         </a-entity>
       </a-camera>
@@ -84,13 +84,13 @@
       <a-entity id="holo">
         <a-entity position="0 0.35 0">
           <a-sphere radius="0.21" position="0 0.38 0" segments-width="20" segments-height="14"
-                    material="color: #62ddff; opacity: 0.48; transparent: true; metalness: .4; roughness: .22"></a-sphere>
+                    material="color: #65e4ff; opacity: 0.70; transparent: true; emissive: #0e9ad8; emissiveIntensity: .45; metalness: .4; roughness: .22"></a-sphere>
           <a-sphere radius="0.225" position="0 0.38 0" wireframe="true"
-                    material="color: #b2f7ff; opacity: .4; transparent: true"></a-sphere>
+                    material="color: #b2f7ff; wireframe: true; opacity: .58; transparent: true"></a-sphere>
           <a-sphere radius=".022" position="-.07 .41 -.19" color="#e9ffff"></a-sphere>
           <a-sphere radius=".022" position=".07 .41 -.19" color="#e9ffff"></a-sphere>
-          <a-cylinder radius-top=".22" radius-bottom=".32" height=".52" position="0 -.10 0"
-                      material="color: #3ec5ef; opacity: .52; transparent: true"></a-cylinder>
+          <a-cylinder radius=".255" height=".52" position="0 -.10 0"
+                      material="color: #0d97ce; opacity: .31; transparent: true; metalness: .35; roughness: .25"></a-cylinder>
           <a-sphere radius=".085" position="-.31 .02 0" scale="1 1.8 1"
                     material="color: #61dbf5; opacity: .6; transparent: true"></a-sphere>
           <a-sphere radius=".085" position=".31 .02 0" scale="1 1.8 1"
@@ -124,8 +124,8 @@
         <a-cylinder radius=".074" height=".12" position="0 .36 0" color="#d6b4a0"></a-cylinder>
 
         <!-- Chaqueta tecnológica, hombros, brazos y manos. -->
-        <a-cylinder radius-top=".22" radius-bottom=".255" height=".53"
-                    position="0 .045 0" material="color:#2d5274; roughness:.68; metalness:.2"></a-cylinder>
+        <a-cylinder radius=".235" height=".53" position="0 .045 0"
+                    material="color:#2d5274; roughness:.68; metalness:.2"></a-cylinder>
         <a-box width=".08" height=".44" depth=".018" position="0 .05 -.251" color="#63c6e3"></a-box>
         <a-sphere radius=".135" position="-.28 .21 0" color="#3f6e8d"></a-sphere>
         <a-sphere radius=".135" position=".28 .21 0" color="#3f6e8d"></a-sphere>
@@ -164,7 +164,7 @@
       </a-entity>
     </a-entity>
 
-    <a-entity id="nameplate" position="0 2.44 -2.25">
+    <a-entity id="nameplate" position="0 2.20 -2.25">
       <a-plane width="2.7" height=".44" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
       <a-text id="speech" value="Hola. Soy tu presencia virtual."
               color="#ddfaff" width="2.52" align="center" wrap-count="32"
@@ -172,7 +172,7 @@
     </a-entity>
 
     <!-- Botones interactivos espaciales -->
-    <a-entity position="0 1.18 -1.93">
+    <a-entity id="controls" position="-1.15 1.15 -1.93" scale=".82 .82 .82">
       <a-box class="clickable" presencia-action="command: holo" position="-.70 0 0"
              width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
       <a-text value="HOLOGRAMA" width="1.0" color="#ecfcff" align="center" position="-.70 0 .032"></a-text>
@@ -255,7 +255,7 @@
     const scene = document.querySelector('a-scene');
     scene.addEventListener('loaded', () => {
       document.getElementById('message').textContent =
-        'PRESENCIA v0.2 lista. Entrá en AR y elegí un modo.';
+        'PRESENCIA v0.3 lista. Elegí un modo. Los controles están a la izquierda.';
     });
     function updateExitVisibility(inXR) {
       const button = document.getElementById('headExit');
