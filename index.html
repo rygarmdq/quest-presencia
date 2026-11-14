@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Presencia — Meta Quest 3 | Prototipo gratuito</title>
   <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.7.0/dist/aframe-extras.min.js"></script>
   <style>
     :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
     body { margin: 0; background: #080e1a; }
@@ -25,6 +26,43 @@
     @media (max-width: 580px) { #hud { right: 16px; max-width: none; } }
   </style>
   <script>
+    AFRAME.registerComponent('presencia-model-fit', {
+      init: function () {
+        const el = this.el;
+        el.addEventListener('model-loaded', function () {
+          try {
+            const mesh = el.getObject3D('mesh');
+            if (!mesh) throw new Error('Modelo vacío');
+            mesh.updateMatrixWorld(true);
+            const bounds = new THREE.Box3().setFromObject(mesh);
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            bounds.getSize(size);
+            bounds.getCenter(center);
+            if (!isFinite(size.y) || size.y <= .01) throw new Error('Altura inválida');
+            const ratio = 1.83 / size.y;
+            mesh.scale.setScalar(ratio);
+            mesh.position.set(-center.x * ratio, -1.20 - bounds.min.y * ratio, -center.z * ratio);
+            const fallback = document.getElementById('humanFallback');
+            if (fallback) fallback.setAttribute('visible', false);
+            el.setAttribute('visible', true);
+            if (document.getElementById('human').getAttribute('visible')) {
+              document.getElementById('message').textContent = 'Robot 3D cargado correctamente.';
+            }
+          } catch (err) {
+            el.setAttribute('visible', false);
+            document.getElementById('message').textContent =
+              'No se pudo preparar el robot 3D. Mantengo el humanoide anterior.';
+          }
+        });
+        el.addEventListener('model-error', function () {
+          el.setAttribute('visible', false);
+          document.getElementById('message').textContent =
+            'No se pudo descargar el modelo 3D. Mantengo el humanoide anterior.';
+        });
+      }
+    });
+
     AFRAME.registerComponent('presencia-action', {
       schema: { command: { type: 'string' } },
       init: function () {
@@ -38,7 +76,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.4 · API: USD 0</span>
+    <span class="badge">Prototipo v0.5 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -48,9 +86,9 @@
       <button onclick="presenciaAction('hello')">Saludar 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.4: rostro visible, holograma refinado y controles más ordenados.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.5: nuevo robot 3D animado; si no carga, se mantiene el personaje anterior.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
-    <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. La voz depende del soporte de tu navegador.</p>
+    <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. Modelo CC0: Tomás Laulhé y Don McCurdy (three.js). La voz depende del navegador.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -115,6 +153,12 @@
 
       <a-entity id="human" visible="false"
                 animation="property: rotation; from:0 -3 0; to:0 3 0; dir:alternate; dur:3600; loop:true; easing:easeInOutSine">
+        <a-entity id="humanModel" visible="false"
+                  gltf-model="url(https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb)"
+                  animation-mixer="clip: Idle; loop: repeat; timeScale: .75"
+                  presencia-model-fit></a-entity>
+        <a-entity id="humanFallback">
+
         <!-- Humanoide reconocible (figura androide estilizada, no fotorrealista). -->
         <!-- Cabeza y rostro: la cámara ve el lado +Z. -->
         <a-sphere radius=".205" position="0 .61 0"
@@ -161,6 +205,7 @@
         <a-cylinder radius=".09" height=".37" position=".14 -.99 0" color="#2d425a"></a-cylinder>
         <a-box width=".22" height=".11" depth=".34" position="-.14 -1.21 -.065" color="#182b3d"></a-box>
         <a-box width=".22" height=".11" depth=".34" position=".14 -1.21 -.065" color="#182b3d"></a-box>
+              </a-entity>
       </a-entity>
 
       <a-entity id="orb" visible="false" position="0 .22 0">
@@ -210,7 +255,7 @@
   <script>
     const replies = {
       holo: 'Modo holograma activado.',
-      human: 'Modo humanoide activado.',
+      human: 'Modo humanoide activado. Robot 3D gratuito, con animación.',
       orb: 'Modo esfera activado.',
       hello: '¡Hola! Soy Presencia, tu prototipo inmersivo. Todavía no tengo una IA conectada.'
     };
@@ -270,7 +315,7 @@
     const scene = document.querySelector('a-scene');
     scene.addEventListener('loaded', () => {
       document.getElementById('message').textContent =
-        'PRESENCIA v0.4 lista. Elegí un modo. Los controles están a la izquierda.';
+        'PRESENCIA v0.5 lista. Probá el nuevo robot 3D en HUMANOIDE.';
     });
     function updateExitVisibility(inXR) {
       const button = document.getElementById('headExit');
