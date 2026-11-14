@@ -107,19 +107,31 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.6 · API: USD 0</span>
+    <span class="badge">Prototipo v0.7 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
       <button onclick="presenciaAction('holo')">Holograma</button>
       <button onclick="presenciaAction('human')">Humanoide</button>
       <button onclick="presenciaAction('orb')">Esfera</button>
-      <button onclick="presenciaAction('hello')">Saludar 🔊</button>
+      <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
+      <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
+      <button onclick="presenciaAction('hello')">Probar voz 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.6: robot 3D reajustado a escala humana y centrado. Seguimos sin APIs de pago.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.7: voz de prueba sin API de pago. Tocá MICROFONO y decí hola, esfera o ayuda.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
-    <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. Modelo CC0: Tomás Laulhé y Don McCurdy (three.js). La voz depende del navegador.</p>
+    <p id="voiceSupport">Comprobando compatibilidad...</p>
+    <p id="voiceState" aria-live="polite">Micrófono apagado</p>
+    <p id="heardText">Escuchado: —</p>
+    <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
+      <input id="typedCommand" aria-label="Comando escrito" maxlength="160"
+             placeholder="Escribí: hola, esfera, ayuda..."
+             style="flex:1;min-width:0;padding:8px;border-radius:8px;background:#0b2032;color:white;border:1px solid #47728a">
+      <button type="submit">Enviar</button>
+    </form>
+    <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
+    <p id="hint">Sin IA conversacional: respuestas y comandos programados. Gratis y sin clave API. El reconocimiento del navegador podría enviar audio a su proveedor. No compartas datos sensibles.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -251,6 +263,10 @@
       </a-entity>
     </a-entity>
 
+    <!-- Indicador visible cuando habla el personaje -->
+    <a-torus id="voicePulse" visible="false" position="0 0.9 -1.65" radius=".18"
+             radius-tubular=".012" material="color:#92fff3;shader:flat;opacity:.7;transparent:true"
+             animation="property:scale;from:.8 .8 .8;to:1.3 1.3 1.3;dir:alternate;dur:430;loop:true"></a-torus>
     <a-entity id="nameplate" position="0 2.54 -2.25">
       <a-plane width="2.25" height=".36" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
       <a-text id="speech" value="Hola. Soy tu presencia virtual."
@@ -258,6 +274,13 @@
               position="0 0 .018"></a-text>
     </a-entity>
 
+    <a-entity id="voiceCard" position="1.03 1.45 -1.96">
+      <a-plane width=".87" height=".46" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
+      <a-text id="xrVoiceState" value="MIC APAGADO" color="#aeffde" width="1.28"
+              align="center" position="0 .11 .01" wrap-count="20"></a-text>
+      <a-text id="xrVoiceDetail" value="Pulsa MICROFONO" color="#ffffff" width="1.23"
+              align="center" position="0 -.08 .01" wrap-count="21"></a-text>
+    </a-entity>
     <!-- Panel vertical compacto a la izquierda, sin superposición con el avatar. -->
     <a-entity id="controls" position="-1.00 1.48 -1.91" scale=".95 .95 .95">
       <a-box class="clickable" presencia-action="command: holo" position="0 .35 0"
@@ -272,9 +295,9 @@
              width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
       <a-text value="ESFERA" width="1" color="#ecfcff" align="center"
               position="0 -.23 .033"></a-text>
-      <a-box class="clickable" presencia-action="command: hello" position="0 -.55 0"
-             width=".65" height=".22" depth=".05" material="color:#133149"></a-box>
-      <a-text value="SALUDAR / VOZ" width="1.10" color="#caffee" align="center"
+      <a-box class="clickable" presencia-action="command: listen" position="0 -.55 0"
+             width=".65" height=".22" depth=".05" material="color:#1e607c"></a-box>
+      <a-text value="MICROFONO" width="1.10" color="#caffee" align="center"
               position="0 -.55 .033"></a-text>
       <a-box class="clickable" presencia-action="command: exit" position="0 -.90 0"
              width=".65" height=".22" depth=".05" material="color:#963646"></a-box>
@@ -284,81 +307,231 @@
   </a-scene>
 
   <script>
+    // PRESENCIA 0.7. Ordenes preprogramadas, sin OpenAI API ni audio almacenado por la página.
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const hasTTS = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
+    let recognizer = null, listening = false, starting = false, gotResult = false, recognitionError = '';
     const replies = {
       holo: 'Modo holograma activado.',
-      human: 'Modo humanoide activado. Robot 3D gratuito, con animación.',
+      human: 'Modo humanoide activado.',
       orb: 'Modo esfera activado.',
-      hello: '¡Hola! Soy Presencia, tu prototipo inmersivo. Todavía no tengo una IA conectada.'
+      hello: 'Hola. Soy PRESENCIA. Podemos probar comandos por voz; todavía no hay una IA conversacional conectada.'
     };
-
-    window.presenciaAction = function (command) {
-      if (command === 'exit') {
-        const scene = document.querySelector('a-scene');
-        const msg = 'Saliendo de realidad mixta...';
-        document.getElementById('message').textContent = msg;
-        document.getElementById('speech').setAttribute('value', msg);
-        try {
-          // WebXR: terminar la sesión activa devuelve al navegador de Quest.
-          const session = scene && scene.renderer && scene.renderer.xr
-            ? scene.renderer.xr.getSession() : null;
-          if (session) {
-            session.end().catch(function () {
-              if (scene && typeof scene.exitVR === 'function') scene.exitVR();
-            });
-          } else if (scene && typeof scene.exitVR === 'function') {
-            scene.exitVR();
-          } else {
-            document.getElementById('message').textContent = 'Usá el botón Meta para salir: no hay sesión AR activa.';
-          }
-        } catch (err) {
-          document.getElementById('message').textContent =
-            'No pude salir automáticamente. Usá el botón Meta de tus Quest 3.';
-        }
+    function text(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    function notice(msg) {
+      text('message', msg);
+      const spatial = document.getElementById('speech');
+      if (spatial) spatial.setAttribute('value', msg.slice(0, 120));
+    }
+    function micStatus(main, sub) {
+      text('voiceState', main + (sub ? ' — ' + sub : ''));
+      const a = document.getElementById('xrVoiceState');
+      const b = document.getElementById('xrVoiceDetail');
+      if (a) a.setAttribute('value', main.slice(0, 25));
+      if (b) b.setAttribute('value', (sub || '').slice(0, 56));
+    }
+    function changeMode(id) {
+      for (const mode of ['holo','human','orb']) {
+        document.getElementById(mode).setAttribute('visible',mode === id);
+      }
+    }
+    function speak(msg) {
+      if (!hasTTS) {
+        micStatus('Voz no compatible','Respuesta en pantalla');
         return;
       }
-      const mode = ['holo', 'human', 'orb'].includes(command) ? command : null;
-      if (mode) {
-        for (const id of ['holo', 'human', 'orb']) {
-          document.getElementById(id).setAttribute('visible', id === mode);
-        }
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(msg);
+        u.lang = 'es-AR';
+        u.rate = .95;
+        const voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('es'));
+        if (voices.length) u.voice = voices.find(v => /es[-_]ar/i.test(v.lang)) || voices[0];
+        const glow = document.getElementById('voicePulse');
+        u.onstart = () => glow && glow.setAttribute('visible',true);
+        u.onend = () => glow && glow.setAttribute('visible',false);
+        u.onerror = () => {
+          if (glow) glow.setAttribute('visible',false);
+          text('voiceState','La salida de voz fue bloqueada por el navegador.');
+        };
+        speechSynthesis.speak(u);
+      } catch (e) {
+        micStatus('Voz no compatible','No se pudo reproducir');
       }
-      const msg = replies[command] || 'Comando no reconocido.';
-      document.getElementById('speech').setAttribute('value', msg);
-      document.getElementById('message').textContent = msg;
-      if (command === 'hello') {
-        if ('speechSynthesis' in window) {
-          try {
-            window.speechSynthesis.cancel();
-            const phrase = new SpeechSynthesisUtterance(msg);
-            phrase.lang = 'es-AR';
-            phrase.rate = .93;
-            phrase.pitch = 1.05;
-            window.speechSynthesis.speak(phrase);
-          } catch (err) {
-            document.getElementById('message').textContent += ' (La voz no está disponible en este navegador.)';
-          }
-        } else {
-          document.getElementById('message').textContent += ' (La voz no está disponible en este navegador.)';
-        }
-      }
-    };
-
-    const scene = document.querySelector('a-scene');
-    scene.addEventListener('loaded', () => {
-      document.getElementById('message').textContent =
-        'PRESENCIA v0.6 lista. Robot reducido y centrado; elegí HUMANOIDE.';
-    });
-    function updateExitVisibility(inXR) {
-      const button = document.getElementById('headExit');
-      if (button) button.setAttribute('visible', !!inXR);
     }
-    scene.addEventListener('enter-vr', () => updateExitVisibility(true));
-    scene.addEventListener('enter-ar', () => updateExitVisibility(true));
-    scene.addEventListener('exit-vr', () => {
-      updateExitVisibility(false);
-      document.getElementById('message').textContent = 'Saliste de AR. Podés volver a entrar.';
+    function reply(msg, audible = true) {
+      notice(msg);
+      if (audible) speak(msg);
+    }
+    function normalized(value) {
+      return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+    }
+    function processPhrase(value) {
+      const phrase = String(value || '').trim().slice(0, 160);
+      if (!phrase) return;
+      text('heardText', 'Escuchado: '+phrase);
+      const q = normalized(phrase);
+      let msg;
+      if (/\b(holograma|holografico)\b/.test(q)) {
+        changeMode('holo'); msg=replies.holo;
+      } else if (/\b(humanoide|robot|personaje)\b/.test(q)) {
+        changeMode('human'); msg=replies.human;
+      } else if (/\b(esfera|orbita)\b/.test(q)) {
+        changeMode('orb'); msg=replies.orb;
+      } else if (/\b(salir de realidad mixta|salir ar|salir de ar)\b/.test(q)) {
+        window.presenciaAction('exit'); return;
+      } else if (/\b(ayuda|comandos|que podes hacer|que puedes hacer)\b/.test(q)) {
+        msg='Decí hola, humanoide, esfera, holograma, qué hora es o salir de realidad mixta.';
+      } else if (/\b(que hora|hora es)\b/.test(q)) {
+        msg='Son las '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
+            ' según el reloj de tu dispositivo.';
+      } else if (/\b(como estas|como va)\b/.test(q)) {
+        msg='Estoy listo para probar nuestra experiencia inmersiva.';
+      } else if (/\b(hola|buenas|buen dia)\b/.test(q)) {
+        msg='¡Hola! Me alegra poder acompañarte en realidad mixta.';
+      } else if (/\b(quien sos|quien eres)\b/.test(q)) {
+        msg='Soy PRESENCIA, un prototipo visual con respuestas programadas, sin una IA conectada todavía.';
+      } else {
+        msg='Escuché: '+phrase+'. Por ahora entiendo unas pocas órdenes. Decí ayuda para conocerlas.';
+      }
+      reply(msg);
+    }
+    function errorMessage(code) {
+      const known = {
+        'not-allowed':'Permiso denegado. Habilitá el micrófono en el navegador.',
+        'service-not-allowed':'El navegador no permite usar este servicio.',
+        'audio-capture':'No se encontró un micrófono utilizable.',
+        'no-speech':'No detecté palabras. Volvé a intentarlo.',
+        'network':'Servicio de reconocimiento no accesible o sin conexión.',
+        'language-not-supported':'El español no está disponible en este navegador.',
+        'aborted':'Escucha cancelada.'
+      };
+      return known[code] || ('Error de reconocimiento: '+(code || 'desconocido'));
+    }
+    function getRecognizer() {
+      if (!Recognition) return null;
+      if (recognizer) return recognizer;
+      recognizer = new Recognition();
+      recognizer.lang = 'es-AR';
+      recognizer.continuous = false;
+      recognizer.interimResults = false;
+      recognizer.maxAlternatives = 1;
+      recognizer.onstart = () => {
+        listening=true; starting=false; gotResult=false; recognitionError='';
+        micStatus('ESCUCHANDO','Decí hola, esfera o ayuda');
+      };
+      recognizer.onspeechstart = () => micStatus('ESCUCHANDO','Detecté voz...');
+      recognizer.onresult = event => {
+        if (gotResult) return;
+        const result = event.results && event.results[0];
+        const heard = result && result[0] && result[0].transcript;
+        if (!heard) return;
+        gotResult=true;
+        micStatus('RECONOCIDO',String(heard).slice(0,30));
+        try {recognizer.stop()} catch (e) {}
+        processPhrase(heard);
+      };
+      recognizer.onerror = event => {
+        recognitionError=errorMessage(event.error);
+        listening=false;starting=false;
+        micStatus('ERROR DE MICROFONO',recognitionError);
+        notice(recognitionError);
+      };
+      recognizer.onend = () => {
+        listening=false;starting=false;
+        if (recognitionError) micStatus('ERROR DE MICROFONO',recognitionError);
+        else if (gotResult) micStatus('MIC APAGADO','Para otra frase, tocá MICROFONO');
+        else micStatus('MIC APAGADO','Sin resultado; tocá MICROFONO otra vez');
+      };
+      return recognizer;
+    }
+    function listen() {
+      if (!Recognition) {
+        micStatus('NO COMPATIBLE','SpeechRecognition ausente');
+        notice('Este navegador no admite reconocimiento Web Speech. Podés probar el comando escrito fuera de AR.');
+        return;
+      }
+      if (listening || starting) {stopListen();return;}
+      starting=true; gotResult=false;recognitionError='';
+      if (hasTTS) speechSynthesis.cancel();
+      micStatus('INICIANDO','Aceptá el permiso de micrófono');
+      // Llamada directa desde el click para respetar el gesto del usuario.
+      try {getRecognizer().start()} catch (e) {
+        starting=false;
+        micStatus('ERROR DE INICIO', e.name || 'No disponible');
+        notice('No pude iniciar la escucha. Probá Comprobar micrófono.');
+      }
+    }
+    function stopListen() {
+      if (recognizer && (listening || starting)) {
+        try {recognizer.abort()} catch (e) {}
+      }
+      listening=false; starting=false;
+      micStatus('MIC APAGADO','Detenido');
+    }
+    async function testMic() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('NO COMPATIBLE','getUserMedia ausente');
+        notice('El navegador no dispone de acceso al micrófono.');
+        return;
+      }
+      micStatus('COMPROBANDO','Aceptá el permiso de micrófono');
+      try {
+        const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+        stream.getTracks().forEach(t=>t.stop());
+        micStatus('MIC AUTORIZADO','Captura OK, no garantiza transcripción');
+        notice('El micrófono puede capturar audio. Ahora probá ESCUCHAR para comprobar el reconocimiento de voz.');
+      } catch(e) {
+        micStatus('MIC BLOQUEADO',e.name || 'Error');
+        notice('No pude acceder al micrófono. Comprobá los permisos del navegador.');
+      }
+    }
+    window.presenciaAction = function(command) {
+      if (command==='listen') {listen();return;}
+      if (command==='stoplisten') {stopListen();return;}
+      if (command==='testmic') {testMic();return;}
+      if (command==='exit') {
+        stopListen();
+        if (hasTTS) speechSynthesis.cancel();
+        notice('Saliendo de realidad mixta...');
+        const scene=document.querySelector('a-scene');
+        try {
+          const session=scene.renderer && scene.renderer.xr && scene.renderer.xr.getSession();
+          if (session) session.end().catch(()=>scene.exitVR());
+          else if (scene.exitVR) scene.exitVR();
+        } catch(e) {notice('Usá el botón Meta para salir.');}
+        return;
+      }
+      if (['holo','human','orb'].includes(command)) changeMode(command);
+      reply(replies[command] || 'Orden no reconocida.',command==='hello');
+    };
+    const scene=document.querySelector('a-scene');
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.7 lista. Tocá MICROFONO y decí hola.'));
+    function exitVisible(v) {
+      const button=document.getElementById('headExit');
+      if (button) button.setAttribute('visible',!!v);
+    }
+    scene.addEventListener('enter-vr',()=>exitVisible(true));
+    scene.addEventListener('enter-ar',()=>exitVisible(true));
+    scene.addEventListener('exit-vr',()=>{
+      stopListen();exitVisible(false);notice('Saliste de AR. Podés volver a entrar.');
     });
-    scene.addEventListener('exit-ar', () => updateExitVisibility(false));
+    scene.addEventListener('exit-ar',()=>exitVisible(false));
+    document.getElementById('textFallback').addEventListener('submit',e=>{
+      e.preventDefault();
+      const input=document.getElementById('typedCommand');
+      const cmd=input.value.trim();
+      if (cmd) {input.value='';processPhrase(cmd);}
+    });
+    text('voiceSupport',
+      (Recognition ? 'Reconocimiento: disponible para probar' : 'Reconocimiento: NO disponible')+
+      ' | '+(hasTTS ? 'Voz: disponible para probar' : 'Voz: NO disponible'));
+    micStatus('MIC APAGADO',Recognition?'Pulsa MICROFONO':'Usá texto fuera de AR');
   </script>
+
 </body>
 </html>
