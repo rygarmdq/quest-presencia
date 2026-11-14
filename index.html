@@ -38,7 +38,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.1 · API: USD 0</span>
+    <span class="badge">Prototipo v0.2 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -46,7 +46,9 @@
       <button onclick="presenciaAction('human')">Humanoide</button>
       <button onclick="presenciaAction('orb')">Esfera</button>
       <button onclick="presenciaAction('hello')">Saludar 🔊</button>
+      <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.2: botón rojo SALIR AR dentro de la escena para regresar al navegador.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. La voz depende del soporte de tu navegador.</p>
   </div>
@@ -65,6 +67,13 @@
                   position="0 0 -0.5"
                   geometry="primitive: ring; radiusInner: 0.005; radiusOuter: 0.009"
                   material="color: #8defff; shader: flat; opacity: 0.65"></a-entity>
+        <!-- Botón de emergencia junto al campo de visión durante AR/VR. -->
+        <a-entity id="headExit" position=".34 .26 -.72" visible="false">
+          <a-plane class="clickable" presencia-action="command: exit"
+                   width=".31" height=".14" material="color: #a52e43; shader: flat; side: double"></a-plane>
+          <a-text value="SALIR AR" align="center" width=".70"
+                  color="#ffffff" position="0 0 .009"></a-text>
+        </a-entity>
       </a-camera>
       <a-entity laser-controls="hand: left" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
       <a-entity laser-controls="hand: right" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
@@ -98,17 +107,49 @@
       </a-entity>
 
       <a-entity id="human" visible="false">
-        <a-sphere radius=".21" position="0 .70 0" color="#d9e9ef"
-                  material="metalness:.25; roughness:.55"></a-sphere>
-        <a-sphere radius=".017" position="-.074 .73 -.189" color="#193e52"></a-sphere>
-        <a-sphere radius=".017" position=".074 .73 -.189" color="#193e52"></a-sphere>
-        <a-cylinder radius-top=".20" radius-bottom=".31" height=".62" position="0 .19 0"
-                    color="#93d9ee" material="metalness:.5; roughness:.28"></a-cylinder>
-        <a-cylinder radius=".085" height=".48" position="-.35 .18 0" rotation="0 0 -14" color="#93d9ee"></a-cylinder>
-        <a-cylinder radius=".085" height=".48" position=".35 .18 0" rotation="0 0 14" color="#93d9ee"></a-cylinder>
-        <a-sphere radius=".11" position="0 .26 -.255" color="#c4f9ff"
-                  material="emissive: #1d8caa; emissiveIntensity: .4"></a-sphere>
-        <a-cylinder radius=".36" height=".015" position="0 -.5 0" color="#4cd4f1"></a-cylinder>
+        <!-- Humanoide reconocible (figura androide estilizada, no fotorrealista). -->
+        <!-- Cabeza, cabello, orejas y rostro: el frente está orientado hacia el usuario. -->
+        <a-sphere radius=".205" position="0 .61 0"
+                  material="color:#e6c9ae; roughness:.85"></a-sphere>
+        <a-sphere radius=".204" position="0 .70 .045" scale="1 0.62 1"
+                  material="color:#273b51; roughness:.75"></a-sphere>
+        <a-sphere radius=".05" position="-.202 .58 0" color="#e6c9ae"></a-sphere>
+        <a-sphere radius=".05" position=".202 .58 0" color="#e6c9ae"></a-sphere>
+        <a-sphere radius=".042" position="-.076 .628 -.181" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".042" position=".076 .628 -.181" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".020" position="-.076 .628 -.218" color="#244b62"></a-sphere>
+        <a-sphere radius=".020" position=".076 .628 -.218" color="#244b62"></a-sphere>
+        <a-sphere radius=".028" position="0 .55 -.206" color="#ddae94"></a-sphere>
+        <a-box width=".084" height=".010" depth=".012" position="0 .493 -.190" color="#995b61"></a-box>
+        <a-cylinder radius=".074" height=".12" position="0 .36 0" color="#d6b4a0"></a-cylinder>
+
+        <!-- Chaqueta tecnológica, hombros, brazos y manos. -->
+        <a-cylinder radius-top=".22" radius-bottom=".255" height=".53"
+                    position="0 .045 0" material="color:#2d5274; roughness:.68; metalness:.2"></a-cylinder>
+        <a-box width=".08" height=".44" depth=".018" position="0 .05 -.251" color="#63c6e3"></a-box>
+        <a-sphere radius=".135" position="-.28 .21 0" color="#3f6e8d"></a-sphere>
+        <a-sphere radius=".135" position=".28 .21 0" color="#3f6e8d"></a-sphere>
+        <a-cylinder radius=".080" height=".38" position="-.34 -.045 0"
+                    rotation="0 0 -12" color="#3f6e8d"></a-cylinder>
+        <a-cylinder radius=".080" height=".38" position=".34 -.045 0"
+                    rotation="0 0 12" color="#3f6e8d"></a-cylinder>
+        <a-sphere radius=".072" position="-.385 -.27 0" color="#d9b8a1"></a-sphere>
+        <a-sphere radius=".072" position=".385 -.27 0" color="#d9b8a1"></a-sphere>
+        <a-cylinder radius=".255" height=".10" position="0 -.28 0" color="#203f5c"></a-cylinder>
+        <a-sphere radius=".095" position="0 .08 -.253"
+                  material="color:#9eeaff; emissive:#328da9; emissiveIntensity:.75"></a-sphere>
+
+        <!-- Piernas separadas y botas: la figura se distingue del torso. -->
+        <a-cylinder radius=".105" height=".43" position="-.13 -.54 0"
+                    rotation="0 0 -3" color="#25384f"></a-cylinder>
+        <a-cylinder radius=".105" height=".43" position=".13 -.54 0"
+                    rotation="0 0 3" color="#25384f"></a-cylinder>
+        <a-sphere radius=".11" position="-.14 -.79 0" color="#496786"></a-sphere>
+        <a-sphere radius=".11" position=".14 -.79 0" color="#496786"></a-sphere>
+        <a-cylinder radius=".09" height=".37" position="-.14 -.99 0" color="#2d425a"></a-cylinder>
+        <a-cylinder radius=".09" height=".37" position=".14 -.99 0" color="#2d425a"></a-cylinder>
+        <a-box width=".22" height=".11" depth=".34" position="-.14 -1.21 -.065" color="#182b3d"></a-box>
+        <a-box width=".22" height=".11" depth=".34" position=".14 -1.21 -.065" color="#182b3d"></a-box>
       </a-entity>
 
       <a-entity id="orb" visible="false" position="0 .22 0">
@@ -131,7 +172,7 @@
     </a-entity>
 
     <!-- Botones interactivos espaciales -->
-    <a-entity position="0 .73 -1.93">
+    <a-entity position="0 1.18 -1.93">
       <a-box class="clickable" presencia-action="command: holo" position="-.70 0 0"
              width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
       <a-text value="HOLOGRAMA" width="1.0" color="#ecfcff" align="center" position="-.70 0 .032"></a-text>
@@ -144,6 +185,10 @@
       <a-box class="clickable" presencia-action="command: hello" position="0 -.34 0"
              width=".85" height=".22" depth=".055" material="color: #133149"></a-box>
       <a-text value="SALUDAR / VOZ" width="1.38" color="#caffee" align="center" position="0 -.34 .032"></a-text>
+      <a-box class="clickable" presencia-action="command: exit" position="0 -.68 0"
+             width=".98" height=".25" depth=".06" material="color: #a52e43"></a-box>
+      <a-text value="SALIR AR  X" width="1.58" color="#ffffff"
+              align="center" position="0 -.68 .038"></a-text>
     </a-entity>
   </a-scene>
 
@@ -156,6 +201,30 @@
     };
 
     window.presenciaAction = function (command) {
+      if (command === 'exit') {
+        const scene = document.querySelector('a-scene');
+        const msg = 'Saliendo de realidad mixta...';
+        document.getElementById('message').textContent = msg;
+        document.getElementById('speech').setAttribute('value', msg);
+        try {
+          // WebXR: terminar la sesión activa devuelve al navegador de Quest.
+          const session = scene && scene.renderer && scene.renderer.xr
+            ? scene.renderer.xr.getSession() : null;
+          if (session) {
+            session.end().catch(function () {
+              if (scene && typeof scene.exitVR === 'function') scene.exitVR();
+            });
+          } else if (scene && typeof scene.exitVR === 'function') {
+            scene.exitVR();
+          } else {
+            document.getElementById('message').textContent = 'Usá el botón Meta para salir: no hay sesión AR activa.';
+          }
+        } catch (err) {
+          document.getElementById('message').textContent =
+            'No pude salir automáticamente. Usá el botón Meta de tus Quest 3.';
+        }
+        return;
+      }
       const mode = ['holo', 'human', 'orb'].includes(command) ? command : null;
       if (mode) {
         for (const id of ['holo', 'human', 'orb']) {
@@ -183,9 +252,22 @@
       }
     };
 
-    document.querySelector('a-scene').addEventListener('loaded', () => {
-      document.getElementById('message').textContent = 'Escena cargada. Entrá en AR y elegí un modo.';
+    const scene = document.querySelector('a-scene');
+    scene.addEventListener('loaded', () => {
+      document.getElementById('message').textContent =
+        'PRESENCIA v0.2 lista. Entrá en AR y elegí un modo.';
     });
+    function updateExitVisibility(inXR) {
+      const button = document.getElementById('headExit');
+      if (button) button.setAttribute('visible', !!inXR);
+    }
+    scene.addEventListener('enter-vr', () => updateExitVisibility(true));
+    scene.addEventListener('enter-ar', () => updateExitVisibility(true));
+    scene.addEventListener('exit-vr', () => {
+      updateExitVisibility(false);
+      document.getElementById('message').textContent = 'Saliste de AR. Podés volver a entrar.';
+    });
+    scene.addEventListener('exit-ar', () => updateExitVisibility(false));
   </script>
 </body>
 </html>
