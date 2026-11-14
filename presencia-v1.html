@@ -669,10 +669,12 @@
         ttsStatus('ERROR AL REPRODUCIR · '+String(e.message||e).slice(0,40));
       }
     }
-    function speak(msg) {
+    async function speak(msg) {
       stopVoiceOutput();
-      if (hasTTS) {
-        try {
+      // Piper primero. Si falla, volvemos a la voz robótica que ya funcionaba.
+      if(piperSession && await speakPiper(msg))return;
+      if(hasTTS){
+        try{
           const u=new SpeechSynthesisUtterance(msg);
           u.lang='es-AR';u.rate=.96;
           u.onstart=()=>{lightSpeaking(true);ttsStatus('HABLANDO');};
@@ -680,9 +682,9 @@
           u.onerror=()=>{lightSpeaking(false);speakOffline(msg);};
           speechSynthesis.speak(u);
           return;
-        } catch(e) {}
+        }catch(e){}
       }
-      speakOffline(msg);
+      await speakOffline(msg);
     }
     function reply(msg, audible = true) {
       notice(msg);
@@ -929,6 +931,7 @@
     }
 
     function listen() {
+      stopVoiceOutput(); // Evita que el micrófono escuche nuestra respuesta
       if (!Recognition) { startLocalSpeech(); return; }
       if (listening || starting) {stopListen();return;}
       starting=true; gotResult=false;recognitionError='';
@@ -967,15 +970,14 @@
       }
     }
     window.presenciaAction = function(command) {
-      if (command==='loadvosk') {
-        unlockSpeaker();
-        prepareVoiceOutput();
-        prepareLocalSpeech();
-        return;
-      }
+      if (command==='loadvosk') {prepareAll();return;}
       if (command==='beep') {testSpeaker();return;}
       if (command==='testvoice') {
         unlockSpeaker();
+        if(!piperSession && !piperFailed){
+          notice('Primero pulsá PREPARAR AMBOS fuera de realidad mixta.');
+          return;
+        }
         reply('Hola. Ahora puedo hablarte en español, desde tu entorno de realidad mixta.',true);
         return;
       }
