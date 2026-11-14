@@ -54,6 +54,7 @@
             const scaledBounds = new THREE.Box3().setFromObject(model);
             const currentCenterWorld = scaledBounds.getCenter(new THREE.Vector3());
             const desiredCenterWorld = el.object3D.getWorldPosition(new THREE.Vector3());
+            desiredCenterWorld.y = 0.82; // pies a ~15 cm del piso (modo room-scale)
             desiredCenterWorld.z -= 0.35;
             const parent = model.parent;
             const currentLocal = parent.worldToLocal(currentCenterWorld.clone());
