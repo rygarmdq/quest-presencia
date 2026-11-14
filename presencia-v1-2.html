@@ -123,22 +123,33 @@
       <button onclick="presenciaAction('testvoice')">🔊 PROBAR VOZ NATURAL</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v1.1 BETA: reconocimiento más tolerante a pausas y frases largas. Ya no corta al primer resultado de Vosk.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v1.2 BETA: respuestas conversacionales opcionales con Ollama en tu PC.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="voiceSupport">Comprobando compatibilidad...</p>
     <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
     <p id="ttsInfo" style="font-size:.75rem;color:#caffee" aria-live="polite">Salida de voz: Piper neuronal, con respaldo meSpeak.</p>
     <p id="piperInfo" style="font-size:.75rem;color:#bbf9dc" aria-live="polite">Piper: sin preparar (modelo ~63 MB).</p>
+    <div style="border:1px solid #286c7b;border-radius:9px;padding:8px;background:#0b2536;margin:8px 0">
+      <p style="color:#a2eeff">🧠 IA LOCAL (PC + Ollama)</p>
+      <input id="brainUrl" type="url" autocomplete="off" placeholder="https://...trycloudflare.com"
+        style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:5px;background:#10283b;color:white;border:1px solid #497892">
+      <input id="brainKey" type="password" autocomplete="off" placeholder="Clave secreta de la PC"
+        style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:5px;background:#10283b;color:white;border:1px solid #497892">
+      <button type="button" id="brainConnect">🔗 CONECTAR IA</button>
+      <button type="button" id="brainDisconnect">DESCONECTAR</button>
+      <p id="brainState" style="color:#a2e7d0" aria-live="polite">IA: SIN CONEXIÓN</p>
+      <p style="font-size:.74rem"><a href="./conexion-ia.html" style="color:#94eaff">Guía gratuita de conexión con la PC</a></p>
+    </div>
     <p id="voiceState" aria-live="polite">Micrófono apagado</p>
     <p id="heardText">Escuchado: —</p>
     <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
-      <input id="typedCommand" aria-label="Comando escrito" maxlength="160"
+      <input id="typedCommand" aria-label="Comando escrito" maxlength="360"
              placeholder="Escribí: hola, esfera, ayuda..."
              style="flex:1;min-width:0;padding:8px;border-radius:8px;background:#0b2032;color:white;border:1px solid #47728a">
       <button type="submit">Enviar</button>
     </form>
     <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
-    <p id="hint">Vosk reconoce órdenes y Piper genera respuestas localmente. Si falla por memoria, se usa meSpeak. Todavía sin IA conversacional: comandos programados. Sin API de pago. No ingreses datos sensibles.</p>
+    <p id="hint">Vosk reconoce voz y Piper responde. Con Ollama conectado podrás conversar con otro modelo local distinto de ChatGPT. Las solicitudes atraviesan Cloudflare; no ingreses datos sensibles.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -298,6 +309,10 @@
                material="color:#205d50;side:double"></a-plane>
       <a-text value="PROBAR VOZ NATURAL" color="#f0fffa" width="1.25" align="center"
               position="0 0 .012"></a-text>
+    </a-entity>
+    <a-entity position="1.03 .65 -1.96">
+      <a-plane width=".89" height=".19" material="color:#0e3c45;opacity:.86;transparent:true;side:double"></a-plane>
+      <a-text id="xrBrainState" value="IA: SIN CONEXION" color="#f8dda8" width="1.32" align="center" position="0 0 .012"></a-text>
     </a-entity>
     <a-entity id="piperCard" position="1.03 .95 -1.96">
       <a-plane width=".89" height=".19" material="color:#103c3d;opacity:.85;transparent:true;side:double"></a-plane>
@@ -1014,7 +1029,7 @@
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
     const scene=document.querySelector('a-scene');
-    scene.addEventListener('loaded',()=>notice('PRESENCIA v1.1 BETA: ahora Vosk reúne fragmentos de voz antes de responder.'));
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v1.2 BETA: prepará voz y conectá IA local en el panel.'));
     function exitVisible(v) {
       const button=document.getElementById('headExit');
       if (button) button.setAttribute('visible',!!v);
