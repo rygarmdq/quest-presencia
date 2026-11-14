@@ -24,10 +24,10 @@ a{color:#a5eaff}
 </style>
 </head>
 <body><main>
-<span class="badge">PRESENCIA • prueba experimental • costo API USD 0</span>
+<span class="badge">PRESENCIA • diagnóstico Piper v2 • costo API USD 0</span>
 <h1>🎙️ Laboratorio de voz natural</h1>
 <p>Vamos a probar <strong>Piper TTS</strong>, una voz neuronal en español (modelo mexicano <code>es_MX-ald-medium</code>) que corre en el navegador. Tu PRESENCIA v0.9.1 original permanece intacta.</p>
-<p><strong>Importante:</strong> la primera descarga del modelo es de aproximadamente 63 MB, más los archivos necesarios para ejecutarlo. Usá Wi-Fi y mantené abierta esta página. En Meta Quest puede fallar por memoria, WebAssembly o compatibilidad.</p>
+<p><strong>Importante:</strong> la primera descarga del modelo es de aproximadamente 63 MB, más los archivos necesarios para ejecutarlo. Esta revisión corrige el enlace a ONNX Runtime Web. Usá Wi-Fi y mantené abierta esta página. En Meta Quest puede fallar por memoria, WebAssembly o compatibilidad.</p>
 <div>
 <button id="beep">🔔 1. TEST SONIDO</button>
 <button id="prepare">📥 2. DESCARGAR VOZ NATURAL</button>
@@ -47,9 +47,15 @@ a{color:#a5eaff}
 (()=>{
   'use strict';
   const VOICE='es_MX-ald-medium';
-  const CDN='https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&target=es2022';
+  // Fijar la MISMA versión ONNX Runtime en la librería JS y en sus binarios WASM.
+  // CDNJS 1.18.0 carece de ort-wasm-simd-threaded.mjs.
+  const ONNX_VERSION='1.20.1';
+  const CDN='https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&target=es2022&deps=onnxruntime-web@'+ONNX_VERSION;
+  const ONNX_CDN='https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/'+ONNX_VERSION+'/';
+  const PHONEMIZER='https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize';
+  const WASM_PATHS={onnxWasm:ONNX_CDN,piperData:PHONEMIZER+'.data',piperWasm:PHONEMIZER+'.wasm'};
   const nodes=Object.fromEntries(['beep','prepare','speak','stop','state','progress','sentence','log'].map(k=>[k,document.getElementById(k)]));
-  let module=null, audioCtx=null, source=null, preparing=false, ready=false;
+  let module=null, audioCtx=null, source=null, preparing=false, ready=false, ttsSession=null;
   function log(message){const time=new Date().toLocaleTimeString('es-AR');nodes.log.textContent='['+time+'] '+message+'\n'+nodes.log.textContent.slice(0,3600);}
   function state(message){nodes.state.textContent=message;log(message);}
   async function unlock(){
@@ -78,16 +84,30 @@ a{color:#a5eaff}
     try{
       state('Importando el motor de voz neuronal... (puede requerir descarga de WebAssembly)');
       if(!module) module=await import(CDN);
-      if(typeof module.predict!=='function' || typeof module.download!=='function')
-        throw new Error('El módulo descargado no expone las funciones predict/download.');
-      state('Descargando el modelo de español mexicano (63 MB aprox.)...');
-      let last=-1;
-      await module.download(VOICE,({loaded,total,url})=>{
+      if(typeof module.TtsSession!=='function' || typeof module.download!=='function')
+        throw new Error('El módulo no expone TtsSession/download para configurar ONNX.');
+      state('Verificando ONNX Runtime '+ONNX_VERSION+'...');
+      const core=await fetch(ONNX_CDN+'ort-wasm-simd-threaded.mjs',{cache:'force-cache'});
+      if(!core.ok)throw new Error('ONNX .mjs inaccesible: HTTP '+core.status);
+      log('Módulo ONNX encontrado. Tipo: '+(core.headers.get('content-type')||'sin informar'));
+      let cached=false;
+      if(typeof module.stored==='function') {
+        try {
+          const saved=await module.stored();
+          cached=Array.isArray(saved) && saved.includes(VOICE);
+        } catch(err){log('No se pudo consultar la caché: '+String(err.message||err).slice(0,100));}
+      }
+      if(cached){log('Modelo recuperado de la memoria local del navegador.');}
+      else {
+        state('Descargando modelo español (63 MB aprox.)...');
+        let last=-1;
+        await module.download(VOICE,({loaded,total,url})=>{
         const pct=(Number(total)>0)?Math.min(100,Math.round(100*loaded/total)):null;
         if(pct!==null){nodes.progress.value=pct;
           if(pct>=last+10){last=pct;log('Modelo '+pct+'% • '+String(url||'').split('/').pop());}
         }
-      });
+        });
+      }
       nodes.progress.value=100;
       ready=true;nodes.speak.disabled=false;
       state('MODELO DESCARGADO. Pulsá PROBAR VOZ NATURAL. Si el navegador falla durante la síntesis, verás el mensaje técnico.');
@@ -106,9 +126,16 @@ a{color:#a5eaff}
       state('Generando voz neuronal en las Quest. Puede demandar recursos...');
       const phrase=nodes.sentence.value.trim().slice(0,280);
       if(!phrase)throw Error('Escribí una frase.');
-      const wav=await module.predict({text:phrase,voiceId:VOICE},progress=>{
-        if(progress&&progress.total>0)log('Progreso modelo: '+Math.round(progress.loaded/progress.total*100)+'%');
-      });
+      // La API directa predict() usaría los WASM por defecto, antes apuntando a CDN roto.
+      if(!ttsSession) {
+        state('Iniciando ONNX Runtime '+ONNX_VERSION+'...');
+        log('Motor WASM: '+ONNX_CDN);
+        ttsSession=await module.TtsSession.create({
+          voiceId:VOICE, wasmPaths:WASM_PATHS,
+          logger:line=>log(String(line).slice(0,180))
+        });
+      }
+      const wav=await ttsSession.predict(phrase);
       state('Modelo generó audio WAV. Decodificando para WebAudio...');
       const binary=await wav.arrayBuffer();
       const audio=await ctx.decodeAudioData(binary.slice(0));
@@ -120,7 +147,11 @@ a{color:#a5eaff}
       source.start();
       state('REPRODUCIENDO: voz neuronal española (México).');
     }catch(err){
-      state('ERROR DE SÍNTESIS/REPRODUCCIÓN: '+String(err&&err.message||err));
+      const errText=String(err&&err.message||err);
+      state('ERROR DE SÍNTESIS/REPRODUCCIÓN: '+errText);
+      if(/no available backend|Failed to fetch dynamically imported module/.test(errText)) {
+        log('ONNX Runtime falló: verificar ruta, versionado compatible, CORS y memoria.');
+      }
     }finally{nodes.speak.disabled=false;}
   }
   window.addEventListener('error',ev=>log('Error global: '+ev.message));
@@ -129,7 +160,7 @@ a{color:#a5eaff}
   nodes.prepare.addEventListener('click',()=>{unlock().catch(()=>{});prepare();});
   nodes.speak.addEventListener('click',speak);
   nodes.stop.addEventListener('click',stop);
-  log('Voz seleccionada: '+VOICE+'. Prueba separada para no romper la versión estable.');
+  log('Voz '+VOICE+' | ONNX '+ONNX_VERSION+' | PRESENCIA estable intacta.');
 })();
 </script>
 </body></html>
