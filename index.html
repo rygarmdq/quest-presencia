@@ -109,23 +109,24 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.8 · API: USD 0</span>
+    <span class="badge">Prototipo v0.9 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
       <button onclick="presenciaAction('holo')">Holograma</button>
       <button onclick="presenciaAction('human')">Humanoide</button>
       <button onclick="presenciaAction('orb')">Esfera</button>
-      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ LOCAL (~40 MB)</button>
+      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ + AUDIO</button>
       <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
       <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
-      <button onclick="presenciaAction('hello')">Probar voz 🔊</button>
+      <button onclick="presenciaAction('testvoice')">🔊 PROBAR RESPUESTA</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.8: motor de voz local Vosk. Primero pulsá PREPARAR VOZ, después MICROFONO.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.9: reconocimiento Vosk + respuesta hablada en español (meSpeak). Primero prepará la voz.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="voiceSupport">Comprobando compatibilidad...</p>
     <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
+    <p id="ttsInfo" style="font-size:.75rem;color:#caffee" aria-live="polite">Salida de voz: sin preparar. Audio en español latinoamericano (meSpeak).</p>
     <p id="voiceState" aria-live="polite">Micrófono apagado</p>
     <p id="heardText">Escuchado: —</p>
     <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
@@ -135,7 +136,7 @@
       <button type="submit">Enviar</button>
     </form>
     <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
-    <p id="hint">Sin IA conversacional: comandos programados. Vosk procesa el sonido localmente después de descargar el modelo, sin transmitir nuestras grabaciones desde la aplicación. No requiere clave API. No compartas datos sensibles mientras probamos compatibilidad.</p>
+    <p id="hint">Sin IA conversacional: comandos programados. Vosk escucha y meSpeak genera respuestas localmente una vez descargados. Sin clave API. La voz de meSpeak es robótica. No ingreses información sensible.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -281,15 +282,17 @@
     <a-entity id="voskLoadPanel" position="1.03 1.92 -1.96">
       <a-plane class="clickable" presencia-action="command: loadvosk" width=".86" height=".19"
                material="color:#165675;side:double"></a-plane>
-      <a-text value="PREPARAR VOZ LOCAL" color="#deffff" width="1.22" align="center"
+      <a-text value="PREPARAR VOZ + AUDIO" color="#deffff" width="1.25" align="center"
               position="0 0 .012"></a-text>
     </a-entity>
     <a-entity id="voiceCard" position="1.03 1.45 -1.96">
-      <a-plane width=".87" height=".46" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
+      <a-plane width=".87" height=".60" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
       <a-text id="xrVoiceState" value="MIC APAGADO" color="#aeffde" width="1.28"
               align="center" position="0 .11 .01" wrap-count="20"></a-text>
       <a-text id="xrVoiceDetail" value="Pulsa MICROFONO" color="#ffffff" width="1.23"
-              align="center" position="0 -.08 .01" wrap-count="21"></a-text>
+              align="center" position="0 -.05 .01" wrap-count="21"></a-text>
+      <a-text id="xrTtsState" value="AUDIO: SIN PREPARAR" color="#ffdcb0" width="1.26"
+              align="center" position="0 -.24 .012" wrap-count="22"></a-text>
     </a-entity>
     <!-- Panel vertical compacto a la izquierda, sin superposición con el avatar. -->
     <a-entity id="controls" position="-1.00 1.48 -1.91" scale=".95 .95 .95">
@@ -348,29 +351,171 @@
         document.getElementById(mode).setAttribute('visible',mode === id);
       }
     }
-    function speak(msg) {
-      if (!hasTTS) {
-        micStatus('Voz no compatible','Respuesta en pantalla');
-        return;
+    // Motor de voz de salida. Quest no tiene SpeechSynthesis; meSpeak produce WAV sin API.
+    const MESPEAK_BASE='https://cdn.jsdelivr.net/gh/foxdog-studios/meSpeak@master/';
+    const MESPEAK_CONFIG=MESPEAK_BASE+'mespeak_config.json';
+    const MESPEAK_VOICE=MESPEAK_BASE+'voices/es-la.json';
+    let voiceAudioContext=null, voiceBufferSource=null, voiceReady=false, voiceLoading=null;
+    let voiceSequence=0;
+    function ttsStatus(msg) {
+      text('ttsInfo','Salida de voz: '+msg);
+      const a=document.getElementById('xrTtsState');
+      if (a) a.setAttribute('value',('AUDIO: '+msg).slice(0,60));
+    }
+    function lightSpeaking(active) {
+      const glow=document.getElementById('voicePulse');
+      if (glow) glow.setAttribute('visible',!!active);
+    }
+    // Inicializar/desbloquear en el click, antes de iniciar cualquier descarga.
+    function unlockSpeaker() {
+      const AC=window.AudioContext || window.webkitAudioContext;
+      if (!AC) {
+        ttsStatus('AudioContext no disponible');
+        return false;
       }
       try {
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(msg);
-        u.lang = 'es-AR';
-        u.rate = .95;
-        const voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('es'));
-        if (voices.length) u.voice = voices.find(v => /es[-_]ar/i.test(v.lang)) || voices[0];
-        const glow = document.getElementById('voicePulse');
-        u.onstart = () => glow && glow.setAttribute('visible',true);
-        u.onend = () => glow && glow.setAttribute('visible',false);
-        u.onerror = () => {
-          if (glow) glow.setAttribute('visible',false);
-          text('voiceState','La salida de voz fue bloqueada por el navegador.');
-        };
-        speechSynthesis.speak(u);
-      } catch (e) {
-        micStatus('Voz no compatible','No se pudo reproducir');
+        if (!voiceAudioContext) voiceAudioContext=new AC();
+        voiceAudioContext.resume().catch(()=>{});
+        const silent=voiceAudioContext.createBuffer(1,1,voiceAudioContext.sampleRate);
+        const node=voiceAudioContext.createBufferSource();
+        node.buffer=silent; node.connect(voiceAudioContext.destination);
+        node.start(0);
+        return true;
+      } catch(e) {
+        ttsStatus('No se pudo desbloquear audio');
+        return false;
       }
+    }
+    function fetchJson(url) {
+      return fetch(url).then(res=>{
+        if (!res.ok) throw Error('HTTP '+res.status);
+        return res.json();
+      });
+    }
+    function loadSpeechScript(url, timeout=14000) {
+      return new Promise((resolve,reject)=>{
+        const tag=document.createElement('script');
+        let settled=false;
+        const timer=setTimeout(()=>{
+          if (settled) return;
+          settled=true;
+          tag.remove();
+          reject(Error('Tiempo agotado descargando el motor'));
+        },timeout);
+        tag.onload=()=>{
+          if (settled) return;
+          settled=true;clearTimeout(timer);resolve();
+        };
+        tag.onerror=()=>{
+          if (settled) return;
+          settled=true;clearTimeout(timer);reject(Error('No se pudo descargar el script'));
+        };
+        tag.src=url;
+        document.head.appendChild(tag);
+      });
+    }
+    async function prepareVoiceOutput() {
+      if (voiceReady) {ttsStatus('español listo');return true;}
+      if (voiceLoading) return voiceLoading;
+      ttsStatus('descargando motor en español...');
+      voiceLoading=(async()=>{
+        if (!window.meSpeak) {
+          try {
+            await loadSpeechScript(MESPEAK_BASE+'mespeak.js');
+          } catch(e) {
+            await loadSpeechScript('https://raw.githubusercontent.com/foxdog-studios/meSpeak/master/mespeak.js');
+          }
+        }
+        if (!window.meSpeak || typeof meSpeak.speak !== 'function')
+          throw Error('El motor meSpeak no quedó disponible');
+        const [config,voice]=await Promise.all([
+          fetchJson(MESPEAK_CONFIG),
+          fetchJson(MESPEAK_VOICE)
+        ]);
+        meSpeak.loadConfig(config);
+        meSpeak.loadVoice(voice);
+        if (meSpeak.isVoiceLoaded && !meSpeak.isVoiceLoaded('es-la'))
+          throw Error('El español latinoamericano no se cargó');
+        voiceReady=true;
+        ttsStatus('ESPAÑOL LISTO · PROBÁ RESPUESTA');
+        return true;
+      })().catch(e=>{
+        voiceReady=false;
+        voiceLoading=null;
+        ttsStatus('ERROR AL CARGAR · '+String(e.message||e).slice(0,45));
+        return false;
+      });
+      return voiceLoading;
+    }
+    function stopVoiceOutput() {
+      voiceSequence++;
+      if (voiceBufferSource) {
+        try {voiceBufferSource.stop()} catch(e){}
+        try {voiceBufferSource.disconnect()} catch(e){}
+      }
+      voiceBufferSource=null;
+      lightSpeaking(false);
+      if (hasTTS) {try{speechSynthesis.cancel()}catch(e){}}
+    }
+    async function speakOffline(message) {
+      if (!voiceReady) {
+        const ok=await prepareVoiceOutput();
+        if (!ok) {
+          ttsStatus('no disponible; respuesta en pantalla');
+          return;
+        }
+      }
+      if (!voiceAudioContext && !unlockSpeaker()) {
+        ttsStatus('necesita un toque en PROBAR RESPUESTA');
+        return;
+      }
+      const seq=++voiceSequence;
+      try {
+        await voiceAudioContext.resume();
+        if (seq!==voiceSequence) return;
+        const raw=meSpeak.speak(String(message).slice(0,250),{
+          rawdata:'arraybuffer',voice:'es-la',speed:150,pitch:48,amplitude:90
+        });
+        if (!raw) throw Error('No se generó el archivo WAV');
+        let arr;
+        if (raw instanceof ArrayBuffer) arr=raw;
+        else if (ArrayBuffer.isView(raw)) arr=raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength);
+        else throw Error('meSpeak devolvió un audio no compatible');
+        const decoded=await voiceAudioContext.decodeAudioData(arr.slice(0));
+        if (seq!==voiceSequence) return;
+        const source=voiceAudioContext.createBufferSource();
+        source.buffer=decoded;
+        source.connect(voiceAudioContext.destination);
+        voiceBufferSource=source;
+        source.onended=()=>{
+          if (voiceBufferSource===source) {
+            voiceBufferSource=null;
+            lightSpeaking(false);
+            ttsStatus('ESPAÑOL LISTO · REPRODUCCIÓN FINALIZADA');
+          }
+        };
+        lightSpeaking(true);
+        ttsStatus('HABLANDO EN ESPAÑOL');
+        source.start(0);
+      } catch(e) {
+        lightSpeaking(false);
+        ttsStatus('ERROR AL REPRODUCIR · '+String(e.message||e).slice(0,40));
+      }
+    }
+    function speak(msg) {
+      stopVoiceOutput();
+      if (hasTTS) {
+        try {
+          const u=new SpeechSynthesisUtterance(msg);
+          u.lang='es-AR';u.rate=.96;
+          u.onstart=()=>{lightSpeaking(true);ttsStatus('HABLANDO');};
+          u.onend=()=>{lightSpeaking(false);ttsStatus('LISTO');};
+          u.onerror=()=>{lightSpeaking(false);speakOffline(msg);};
+          speechSynthesis.speak(u);
+          return;
+        } catch(e) {}
+      }
+      speakOffline(msg);
     }
     function reply(msg, audible = true) {
       notice(msg);
@@ -655,13 +800,23 @@
       }
     }
     window.presenciaAction = function(command) {
-      if (command==='loadvosk') {prepareLocalSpeech();return;}
+      if (command==='loadvosk') {
+        unlockSpeaker();
+        prepareVoiceOutput();
+        prepareLocalSpeech();
+        return;
+      }
+      if (command==='testvoice') {
+        unlockSpeaker();
+        reply('Hola. Ahora puedo hablarte en español, desde tu entorno de realidad mixta.',true);
+        return;
+      }
       if (command==='listen') {listen();return;}
       if (command==='stoplisten') {stopListen();return;}
       if (command==='testmic') {testMic();return;}
       if (command==='exit') {
         stopListen();
-        if (hasTTS) speechSynthesis.cancel();
+        stopVoiceOutput();
         notice('Saliendo de realidad mixta...');
         const scene=document.querySelector('a-scene');
         try {
@@ -675,7 +830,7 @@
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
     const scene=document.querySelector('a-scene');
-    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.8 lista. Para hablar, primero prepará Vosk local.'));
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.9 lista. Prepará voz y audio; probá la respuesta hablada.'));
     function exitVisible(v) {
       const button=document.getElementById('headExit');
       if (button) button.setAttribute('visible',!!v);
@@ -683,7 +838,7 @@
     scene.addEventListener('enter-vr',()=>exitVisible(true));
     scene.addEventListener('enter-ar',()=>exitVisible(true));
     scene.addEventListener('exit-vr',()=>{
-      stopListen();exitVisible(false);notice('Saliste de AR. Podés volver a entrar.');
+      stopListen();stopVoiceOutput();exitVisible(false);notice('Saliste de AR. Podés volver a entrar.');
     });
     scene.addEventListener('exit-ar',()=>exitVisible(false));
     document.getElementById('textFallback').addEventListener('submit',e=>{
