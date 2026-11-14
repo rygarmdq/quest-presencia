@@ -116,18 +116,19 @@
       <button onclick="presenciaAction('holo')">Holograma</button>
       <button onclick="presenciaAction('human')">Humanoide</button>
       <button onclick="presenciaAction('orb')">Esfera</button>
-      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ + AUDIO</button>
+      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOSK + PIPER</button>
       <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
       <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
       <button onclick="presenciaAction('beep')">🔔 TEST SONIDO</button>
-      <button onclick="presenciaAction('testvoice')">🔊 PROBAR RESPUESTA</button>
+      <button onclick="presenciaAction('testvoice')">🔊 PROBAR VOZ NATURAL</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.9.1: corregida la carga de voz. Probá primero TEST SONIDO, luego PREPARAR VOZ + AUDIO.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v1.0 BETA: Vosk escucha y Piper responde; cargá ambos motores antes de entrar en AR. meSpeak es el respaldo.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="voiceSupport">Comprobando compatibilidad...</p>
     <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
-    <p id="ttsInfo" style="font-size:.75rem;color:#caffee" aria-live="polite">Salida de voz: sin preparar. Audio en español latinoamericano (meSpeak).</p>
+    <p id="ttsInfo" style="font-size:.75rem;color:#caffee" aria-live="polite">Salida de voz: Piper neuronal, con respaldo meSpeak.</p>
+    <p id="piperInfo" style="font-size:.75rem;color:#bbf9dc" aria-live="polite">Piper: sin preparar (modelo ~63 MB).</p>
     <p id="voiceState" aria-live="polite">Micrófono apagado</p>
     <p id="heardText">Escuchado: —</p>
     <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
@@ -137,7 +138,7 @@
       <button type="submit">Enviar</button>
     </form>
     <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
-    <p id="hint">Sin IA conversacional: comandos programados. Vosk escucha y meSpeak genera respuestas localmente una vez descargados. Sin clave API. La voz de meSpeak es robótica. No ingreses información sensible.</p>
+    <p id="hint">Vosk reconoce órdenes y Piper genera respuestas localmente. Si falla por memoria, se usa meSpeak. Todavía sin IA conversacional: comandos programados. Sin API de pago. No ingreses datos sensibles.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -283,7 +284,7 @@
     <a-entity id="voskLoadPanel" position="1.03 1.92 -1.96">
       <a-plane class="clickable" presencia-action="command: loadvosk" width=".86" height=".19"
                material="color:#165675;side:double"></a-plane>
-      <a-text value="PREPARAR VOZ + AUDIO" color="#deffff" width="1.25" align="center"
+      <a-text value="PREPARAR AMBOS" color="#deffff" width="1.25" align="center"
               position="0 0 .012"></a-text>
     </a-entity>
     <a-entity id="soundTestPanel" position="1.03 2.48 -1.96">
@@ -295,8 +296,12 @@
     <a-entity id="voiceTestPanel" position="1.03 2.21 -1.96">
       <a-plane class="clickable" presencia-action="command: testvoice" width=".86" height=".19"
                material="color:#205d50;side:double"></a-plane>
-      <a-text value="PROBAR RESPUESTA" color="#f0fffa" width="1.25" align="center"
+      <a-text value="PROBAR VOZ NATURAL" color="#f0fffa" width="1.25" align="center"
               position="0 0 .012"></a-text>
+    </a-entity>
+    <a-entity id="piperCard" position="1.03 .95 -1.96">
+      <a-plane width=".89" height=".19" material="color:#103c3d;opacity:.85;transparent:true;side:double"></a-plane>
+      <a-text id="xrPiperState" value="PIPER: SIN PREPARAR" color="#bbf9d9" width="1.32" align="center" position="0 0 .012" wrap-count="22"></a-text>
     </a-entity>
     <a-entity id="voiceCard" position="1.03 1.45 -1.96">
       <a-plane width=".87" height=".60" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
@@ -901,7 +906,7 @@
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
     const scene=document.querySelector('a-scene');
-    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.9.1 lista. Primero TEST SONIDO; luego PREPARAR VOZ + AUDIO.'));
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v1.0 BETA: prepará Vosk y Piper antes de entrar en AR.'));
     function exitVisible(v) {
       const button=document.getElementById('headExit');
       if (button) button.setAttribute('visible',!!v);
