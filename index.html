@@ -26,39 +26,69 @@
     @media (max-width: 580px) { #hud { right: 16px; max-width: none; } }
   </style>
   <script>
+    // PRESENCIA: conservar la escala propia del GLB y centrarlo en coordenadas locales.
+    // Nunca reemplazar mesh.scale con setScalar(ratio): podría borrar la escala raíz del autor.
     AFRAME.registerComponent('presencia-model-fit', {
       init: function () {
         const el = this.el;
         el.addEventListener('model-loaded', function () {
           try {
-            const mesh = el.getObject3D('mesh');
-            if (!mesh) throw new Error('Modelo vacío');
-            mesh.updateMatrixWorld(true);
-            const bounds = new THREE.Box3().setFromObject(mesh);
-            const size = new THREE.Vector3();
-            const center = new THREE.Vector3();
-            bounds.getSize(size);
-            bounds.getCenter(center);
-            if (!isFinite(size.y) || size.y <= .01) throw new Error('Altura inválida');
-            const ratio = 1.83 / size.y;
-            mesh.scale.setScalar(ratio);
-            mesh.position.set(-center.x * ratio, -1.20 - bounds.min.y * ratio, -center.z * ratio);
+            const model = el.getObject3D('mesh');
+            if (!model || !model.parent) throw new Error('Modelo 3D incompleto');
+            model.updateWorldMatrix(true, true);
+            const originalBounds = new THREE.Box3().setFromObject(model);
+            const originalHeight = originalBounds.getSize(new THREE.Vector3()).y;
+            if (!isFinite(originalHeight) || originalHeight <= 0.001) {
+              throw new Error('Altura inválida del GLB');
+            }
+
+            // Un tamaño cómodo: 1,35 m de alto, a unos 2,55 m del usuario.
+            // Usamos multiplicación para respetar cualquier escala que traiga el modelo.
+            const targetHeight = 1.35;
+            const correction = targetHeight / originalHeight;
+            model.scale.multiplyScalar(correction);
+            model.updateWorldMatrix(true, true);
+
+            // Box3 ofrece coordenadas globales. Convertimos a coordenadas del padre
+            // antes de desplazar la malla, evitando acercarla accidentalmente a la cámara.
+            const scaledBounds = new THREE.Box3().setFromObject(model);
+            const currentCenterWorld = scaledBounds.getCenter(new THREE.Vector3());
+            const desiredCenterWorld = el.object3D.getWorldPosition(new THREE.Vector3());
+            desiredCenterWorld.z -= 0.35;
+            const parent = model.parent;
+            const currentLocal = parent.worldToLocal(currentCenterWorld.clone());
+            const desiredLocal = parent.worldToLocal(desiredCenterWorld.clone());
+            model.position.add(desiredLocal.sub(currentLocal));
+            model.updateWorldMatrix(true, true);
+
+            // Verificación adicional: si algo sale mal, mantener el muñeco básico.
+            const finalBounds = new THREE.Box3().setFromObject(model);
+            const finalHeight = finalBounds.getSize(new THREE.Vector3()).y;
+            const finalCenter = finalBounds.getCenter(new THREE.Vector3());
+            if (!isFinite(finalHeight) || finalHeight < 0.5 || finalHeight > 2.0
+                || !isFinite(finalCenter.z)) {
+              throw new Error('Escalado fuera del rango seguro');
+            }
+
             const fallback = document.getElementById('humanFallback');
             if (fallback) fallback.setAttribute('visible', false);
             el.setAttribute('visible', true);
-            if (document.getElementById('human').getAttribute('visible')) {
-              document.getElementById('message').textContent = 'Robot 3D cargado correctamente.';
-            }
+            document.getElementById('message').textContent =
+              'Robot 3D listo (altura aprox. ' + finalHeight.toFixed(2) + ' m).';
           } catch (err) {
             el.setAttribute('visible', false);
+            const fallback = document.getElementById('humanFallback');
+            if (fallback) fallback.setAttribute('visible', true);
             document.getElementById('message').textContent =
-              'No se pudo preparar el robot 3D. Mantengo el humanoide anterior.';
+              'Problema al ajustar el robot 3D: se conserva el humanoide básico.';
           }
         });
         el.addEventListener('model-error', function () {
           el.setAttribute('visible', false);
+          const fallback = document.getElementById('humanFallback');
+          if (fallback) fallback.setAttribute('visible', true);
           document.getElementById('message').textContent =
-            'No se pudo descargar el modelo 3D. Mantengo el humanoide anterior.';
+            'No se descargó el modelo 3D. Humanoide básico disponible.';
         });
       }
     });
@@ -76,7 +106,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.5 · API: USD 0</span>
+    <span class="badge">Prototipo v0.6 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -86,7 +116,7 @@
       <button onclick="presenciaAction('hello')">Saludar 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.5: nuevo robot 3D animado; si no carga, se mantiene el personaje anterior.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.6: robot 3D reajustado a escala humana y centrado. Seguimos sin APIs de pago.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. Modelo CC0: Tomás Laulhé y Don McCurdy (three.js). La voz depende del navegador.</p>
   </div>
@@ -315,7 +345,7 @@
     const scene = document.querySelector('a-scene');
     scene.addEventListener('loaded', () => {
       document.getElementById('message').textContent =
-        'PRESENCIA v0.5 lista. Probá el nuevo robot 3D en HUMANOIDE.';
+        'PRESENCIA v0.6 lista. Robot reducido y centrado; elegí HUMANOIDE.';
     });
     function updateExitVisibility(inXR) {
       const button = document.getElementById('headExit');
