@@ -375,6 +375,98 @@
     const MESPEAK_VOICE=MESPEAK_BASE+'voices/es-la.json';
     let voiceAudioContext=null, voiceBufferSource=null, voiceReady=false, voiceLoading=null;
     let voiceSequence=0, voiceLastError='';
+    // PRESENCIA 1.0 BETA: Piper corriendo localmente con WebAssembly.
+    // Usamos el ONNX 1.20.1 que superó la prueba aislada en Meta Quest.
+    const PIPER_VOICE='es_MX-ald-medium';
+    const PIPER_VER='1.20.1';
+    const PIPER_BUNDLE='https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&target=es2022&deps=onnxruntime-web@'+PIPER_VER;
+    const PIPER_ONNX='https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/'+PIPER_VER+'/';
+    const PIPER_PHON='https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize';
+    const PIPER_WASM={onnxWasm:PIPER_ONNX,piperData:PIPER_PHON+'.data',piperWasm:PIPER_PHON+'.wasm'};
+    let piperModule=null,piperSession=null,piperPromise=null,piperFailed=false;
+    function piperStatus(message){
+      text('piperInfo','Piper: '+message);
+      const box=document.getElementById('xrPiperState');
+      if(box)box.setAttribute('value',('PIPER: '+message).slice(0,48));
+    }
+    async function preparePiper(){
+      if(piperSession){piperStatus('LISTO');return true;}
+      if(piperPromise)return piperPromise;
+      piperFailed=false;
+      piperPromise=(async()=>{
+        piperStatus('cargando librería...');
+        if(!piperModule)piperModule=await import(PIPER_BUNDLE);
+        if(!piperModule.TtsSession || typeof piperModule.TtsSession.create!=='function')
+          throw Error('Módulo Piper incompatible');
+        piperStatus('verificando ONNX...');
+        const result=await fetch(PIPER_ONNX+'ort-wasm-simd-threaded.mjs',{cache:'force-cache'});
+        if(!result.ok)throw Error('ONNX .mjs HTTP '+result.status);
+        piperStatus('cargando modelo ~63 MB...');
+        piperSession=await piperModule.TtsSession.create({
+          voiceId:PIPER_VOICE,wasmPaths:PIPER_WASM,
+          progress:p=>{
+            if(p && p.total>0){
+              const pct=Math.round(p.loaded/p.total*100);
+              if(pct===100 || pct%10===0)piperStatus('modelo '+pct+'%');
+            }
+          }
+        });
+        piperStatus('LISTO · VOZ NATURAL');
+        return true;
+      })().catch(err=>{
+        piperFailed=true;piperSession=null;
+        piperStatus('FALLO: '+String(err.message||err).slice(0,42));
+        return false;
+      }).finally(()=>{piperPromise=null;});
+      return piperPromise;
+    }
+    async function prepareAll(){
+      unlockSpeaker(); // gesto para habilitar audio en Quest Browser
+      notice('Preparando reconocimiento Vosk y voz Piper; no se descargan en paralelo.');
+      await prepareLocalSpeech();
+      const natural=await preparePiper();
+      if(!natural){
+        notice('Piper falló. Preparando meSpeak como respaldo.');
+        await prepareVoiceOutput();
+      }else notice('Motores preparados. Entrá en AR y presioná MICROFONO.');
+      if(!localModel)notice('Vosk todavía no está listo. Comprobá el indicador de micrófono.');
+    }
+    async function speakPiper(message){
+      if(!piperSession)return false;
+      const token=++voiceSequence;
+      try{
+        if(!voiceAudioContext && !unlockSpeaker())throw Error('AudioContext no disponible');
+        await voiceAudioContext.resume();
+        if(token!==voiceSequence)return true;
+        ttsStatus('Piper generando voz...');
+        const blob=await piperSession.predict(String(message).slice(0,220));
+        if(token!==voiceSequence)return true;
+        const bytes=await blob.arrayBuffer();
+        const audio=await voiceAudioContext.decodeAudioData(bytes.slice(0));
+        if(token!==voiceSequence)return true;
+        const output=voiceAudioContext.createBufferSource();
+        output.buffer=audio;output.connect(voiceAudioContext.destination);
+        voiceBufferSource=output;
+        output.onended=()=>{
+          if(voiceBufferSource===output){
+            voiceBufferSource=null;
+            lightSpeaking(false);
+            ttsStatus('PIPER listo');
+          }
+        };
+        lightSpeaking(true);ttsStatus('PIPER hablando...');
+        output.start(0);
+        return true;
+      }catch(err){
+        if(token!==voiceSequence)return true;
+        piperFailed=true;piperSession=null;
+        piperStatus('ERROR: '+String(err.message||err).slice(0,42));
+        lightSpeaking(false);
+        ttsStatus('Piper falló; activando meSpeak...');
+        return false;
+      }
+    }
+
     function ttsStatus(msg) {
       text('ttsInfo','Salida de voz: '+msg);
       const a=document.getElementById('xrTtsState');
