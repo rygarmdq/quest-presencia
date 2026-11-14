@@ -896,7 +896,7 @@
         recognizer.on('partialresult',data=>{
           if(localSession!==session || localResultHandled)return;
           const p=String((data&&data.result&&data.result.partial)||'').trim();
-          if(!p)return;
+          if(!p || p===localPartial)return;
           localPartial=p;
           if(localFinishTimer){clearTimeout(localFinishTimer);localFinishTimer=null;}
           const now=performance.now();
