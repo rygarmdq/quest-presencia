@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PRESENCIA — laboratorio de voz neuronal gratuita</title>
+<style>
+:root{font-family:system-ui,Segoe UI,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(145deg,#070e20,#102c3d);color:#e5f9ff;min-height:100vh;padding:22px}
+main{max-width:780px;margin:10px auto;background:rgba(4,17,34,.85);border:1px solid #2d7796;border-radius:20px;padding:22px;box-shadow:0 24px 70px #0004}
+h1{font-size:1.65rem;margin:0 0 7px}h2{font-size:1rem}
+p{line-height:1.5;color:#b5dce7}button,textarea{font:inherit}
+button{cursor:pointer;border:1px solid #4ab8ca;background:#124b67;color:white;padding:12px 15px;border-radius:12px;margin:6px 5px 6px 0}
+button:hover{background:#1d6483}
+button:disabled{opacity:.48;cursor:not-allowed}
+textarea{background:#071b2b;color:white;border:1px solid #306d86;border-radius:12px;padding:13px;width:100%;resize:vertical;min-height:90px}
+#state{padding:14px;border-radius:13px;background:#0a3647;border:1px solid #247894;color:#aaf9e6;white-space:pre-wrap;line-height:1.45;margin:15px 0}
+#progress{width:100%;height:15px}
+#log{background:#071827;border:1px solid #21455c;color:#9bc1d1;border-radius:10px;padding:12px;max-height:190px;overflow:auto;font-size:.78rem;white-space:pre-wrap;overflow-wrap:anywhere}
+small{color:#a7cbd5}
+a{color:#a5eaff}
+.badge{display:inline-block;border:1px solid #2c937c;border-radius:20px;padding:3px 10px;color:#95f9c9;font-size:.75rem;margin-bottom:10px}
+</style>
+</head>
+<body><main>
+<span class="badge">PRESENCIA • prueba experimental • costo API USD 0</span>
+<h1>🎙️ Laboratorio de voz natural</h1>
+<p>Vamos a probar <strong>Piper TTS</strong>, una voz neuronal en español (modelo mexicano <code>es_MX-ald-medium</code>) que corre en el navegador. Tu PRESENCIA v0.9.1 original permanece intacta.</p>
+<p><strong>Importante:</strong> la primera descarga del modelo es de aproximadamente 63 MB, más los archivos necesarios para ejecutarlo. Usá Wi-Fi y mantené abierta esta página. En Meta Quest puede fallar por memoria, WebAssembly o compatibilidad.</p>
+<div>
+<button id="beep">🔔 1. TEST SONIDO</button>
+<button id="prepare">📥 2. DESCARGAR VOZ NATURAL</button>
+<button id="speak" disabled>🔊 3. PROBAR VOZ NATURAL</button>
+<button id="stop">■ DETENER</button>
+</div>
+<div id="state" role="status" aria-live="polite">Listo para probar. Primero pulsá TEST SONIDO.</div>
+<progress id="progress" value="0" max="100"></progress>
+<p style="margin:14px 0 6px">Texto para escuchar:</p>
+<textarea id="sentence">Hola, qué bueno volver a hablar con vos desde la realidad mixta. Soy PRESENCIA y estamos probando una voz más natural, completamente gratis.</textarea>
+<p><small>El audio se genera localmente después de descargar el modelo. No requiere credenciales ni pago por uso. La primera síntesis puede consumir bastante memoria y demorar.</small></p>
+<h2>Detalles técnicos (para identificar fallas)</h2>
+<div id="log" aria-live="polite"></div>
+<p><a href="./?version=091">← Volver a PRESENCIA estable (v0.9.1)</a></p>
+</main>
+<script>
+(()=>{
+  'use strict';
+  const VOICE='es_MX-ald-medium';
+  const CDN='https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&target=es2022';
+  const nodes=Object.fromEntries(['beep','prepare','speak','stop','state','progress','sentence','log'].map(k=>[k,document.getElementById(k)]));
+  let module=null, audioCtx=null, source=null, preparing=false, ready=false;
+  function log(message){const time=new Date().toLocaleTimeString('es-AR');nodes.log.textContent='['+time+'] '+message+'\n'+nodes.log.textContent.slice(0,3600);}
+  function state(message){nodes.state.textContent=message;log(message);}
+  async function unlock(){
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)throw new Error('AudioContext no disponible.');
+    if(!audioCtx)audioCtx=new AC();
+    await audioCtx.resume();
+    return audioCtx;
+  }
+  async function beep(){
+    try{
+      const ctx=await unlock();
+      const tone=ctx.createOscillator();const volume=ctx.createGain();
+      tone.frequency.value=520;volume.gain.value=.035;
+      tone.connect(volume);volume.connect(ctx.destination);
+      tone.start();tone.stop(ctx.currentTime+.25);
+      tone.onended=()=>{tone.disconnect();volume.disconnect();};
+      state('Tono emitido. Si lo escuchaste, el audio WebAudio funciona en las Quest.');
+    }catch(err){state('ERROR TEST SONIDO: '+err.message);}
+  }
+  async function prepare(){
+    if(preparing){state('Descarga o preparación en curso.');return;}
+    if(ready){state('Voz neuronal preparada. Ya podés pulsar PROBAR VOZ NATURAL.');return;}
+    preparing=true;nodes.prepare.disabled=true;
+    nodes.progress.removeAttribute('value');
+    try{
+      state('Importando el motor de voz neuronal... (puede requerir descarga de WebAssembly)');
+      if(!module) module=await import(CDN);
+      if(typeof module.predict!=='function' || typeof module.download!=='function')
+        throw new Error('El módulo descargado no expone las funciones predict/download.');
+      state('Descargando el modelo de español mexicano (63 MB aprox.)...');
+      let last=-1;
+      await module.download(VOICE,({loaded,total,url})=>{
+        const pct=(Number(total)>0)?Math.min(100,Math.round(100*loaded/total)):null;
+        if(pct!==null){nodes.progress.value=pct;
+          if(pct>=last+10){last=pct;log('Modelo '+pct+'% • '+String(url||'').split('/').pop());}
+        }
+      });
+      nodes.progress.value=100;
+      ready=true;nodes.speak.disabled=false;
+      state('MODELO DESCARGADO. Pulsá PROBAR VOZ NATURAL. Si el navegador falla durante la síntesis, verás el mensaje técnico.');
+    }catch(err){
+      ready=false;
+      nodes.progress.value=0;
+      state('NO SE PUDO PREPARAR PIPER: '+String(err&&err.message||err));
+    }finally{preparing=false;nodes.prepare.disabled=false;}
+  }
+  function stop(){if(source){try{source.stop();source.disconnect()}catch(e){}source=null;}state('Reproducción detenida.');}
+  async function speak(){
+    if(!ready){state('Primero descargá el modelo de voz natural.');return;}
+    nodes.speak.disabled=true;
+    try{
+      const ctx=await unlock();
+      state('Generando voz neuronal en las Quest. Puede demandar recursos...');
+      const phrase=nodes.sentence.value.trim().slice(0,280);
+      if(!phrase)throw Error('Escribí una frase.');
+      const wav=await module.predict({text:phrase,voiceId:VOICE},progress=>{
+        if(progress&&progress.total>0)log('Progreso modelo: '+Math.round(progress.loaded/progress.total*100)+'%');
+      });
+      state('Modelo generó audio WAV. Decodificando para WebAudio...');
+      const binary=await wav.arrayBuffer();
+      const audio=await ctx.decodeAudioData(binary.slice(0));
+      if(source){try{source.stop()}catch(e){}}
+      source=ctx.createBufferSource();
+      source.buffer=audio;
+      source.connect(ctx.destination);
+      source.onended=()=>{source=null;state('VOZ NATURAL REPRODUCIDA. ¿Suena mejor que meSpeak?');};
+      source.start();
+      state('REPRODUCIENDO: voz neuronal española (México).');
+    }catch(err){
+      state('ERROR DE SÍNTESIS/REPRODUCCIÓN: '+String(err&&err.message||err));
+    }finally{nodes.speak.disabled=false;}
+  }
+  window.addEventListener('error',ev=>log('Error global: '+ev.message));
+  window.addEventListener('unhandledrejection',ev=>log('Error promesa: '+String(ev.reason&&ev.reason.message||ev.reason)));
+  nodes.beep.addEventListener('click',beep);
+  nodes.prepare.addEventListener('click',()=>{unlock().catch(()=>{});prepare();});
+  nodes.speak.addEventListener('click',speak);
+  nodes.stop.addEventListener('click',stop);
+  log('Voz seleccionada: '+VOICE+'. Prueba separada para no romper la versión estable.');
+})();
+</script>
+</body></html>
