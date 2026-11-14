@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presencia — Meta Quest 3 | Prototipo gratuito</title>
+  <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    body { margin: 0; background: #080e1a; }
+    #hud { position: fixed; top: 16px; left: 16px; z-index: 10; max-width: 370px;
+      padding: 15px 18px; border-radius: 17px; background: rgba(8,19,34,.88);
+      border: 1px solid rgba(114,220,255,.34); color:#e6faff;
+      box-shadow: 0 8px 50px rgba(0,0,0,.2); backdrop-filter: blur(10px); }
+    h1 { font-size: 1.13rem; margin: 0 0 4px; letter-spacing: .02em; }
+    p { margin: 5px 0 10px; font-size: .85rem; line-height: 1.4; color: #c4dbe7; }
+    .badge { display: inline-block; border: 1px solid #36b6aa; border-radius: 100px;
+      padding: 2px 9px; font-size: .72rem; margin-bottom: 8px; color:#93f2d1; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    button { border: 1px solid #42759c; background: #163454; color: #edfaff;
+      border-radius: 10px; padding: 8px 10px; font-size: .79rem; cursor: pointer; }
+    button:hover { background: #28608a; }
+    #message { margin-top: 9px; min-height: 22px; color:#9deee2; font-size: .8rem; }
+    #hint { margin-bottom: 0; font-size: .74rem; color: #90acbc; }
+    @media (max-width: 580px) { #hud { right: 16px; max-width: none; } }
+  </style>
+  <script>
+    AFRAME.registerComponent('presencia-action', {
+      schema: { command: { type: 'string' } },
+      init: function () {
+        const self = this;
+        this.el.addEventListener('click', function () { window.presenciaAction(self.data.command); });
+        this.el.addEventListener('mouseenter', function () { self.el.setAttribute('material', 'color', '#275b7a'); });
+        this.el.addEventListener('mouseleave', function () { self.el.setAttribute('material', 'color', '#133149'); });
+      }
+    });
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <span class="badge">Prototipo v0.1 · API: USD 0</span>
+    <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
+    <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
+    <div class="actions">
+      <button onclick="presenciaAction('holo')">Holograma</button>
+      <button onclick="presenciaAction('human')">Humanoide</button>
+      <button onclick="presenciaAction('orb')">Esfera</button>
+      <button onclick="presenciaAction('hello')">Saludar 🔊</button>
+    </div>
+    <div id="message" role="status">Preparando la escena 3D...</div>
+    <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. La voz depende del soporte de tu navegador.</p>
+  </div>
+
+  <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
+           loading-screen="dotsColor: #73dffb; backgroundColor: #070d1a">
+    <!-- El cielo existe solo en la vista plana/VR. En AR se oculta para dejar ver el passthrough. -->
+    <a-sky color="#0c172b" hide-on-enter-ar></a-sky>
+    <a-entity light="type: ambient; color: #b2e5ff; intensity: 0.9"></a-entity>
+    <a-entity light="type: point; color: #37d7ff; intensity: 1.6; distance: 6" position="1 2 -1"></a-entity>
+
+    <a-entity id="rig">
+      <a-camera position="0 1.6 0" look-controls wasd-controls>
+        <a-entity cursor="fuse: true; fuseTimeout: 1300"
+                  raycaster="objects: .clickable; far: 8"
+                  position="0 0 -0.5"
+                  geometry="primitive: ring; radiusInner: 0.005; radiusOuter: 0.009"
+                  material="color: #8defff; shader: flat; opacity: 0.65"></a-entity>
+      </a-camera>
+      <a-entity laser-controls="hand: left" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
+      <a-entity laser-controls="hand: right" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
+    </a-entity>
+
+    <!-- Avatar principal: a 2.2 metros, con las tres variantes del modo C. -->
+    <a-entity id="presence" position="0 1.22 -2.2">
+      <a-entity id="holo">
+        <a-entity position="0 0.35 0">
+          <a-sphere radius="0.21" position="0 0.38 0" segments-width="20" segments-height="14"
+                    material="color: #62ddff; opacity: 0.48; transparent: true; metalness: .4; roughness: .22"></a-sphere>
+          <a-sphere radius="0.225" position="0 0.38 0" wireframe="true"
+                    material="color: #b2f7ff; opacity: .4; transparent: true"></a-sphere>
+          <a-sphere radius=".022" position="-.07 .41 -.19" color="#e9ffff"></a-sphere>
+          <a-sphere radius=".022" position=".07 .41 -.19" color="#e9ffff"></a-sphere>
+          <a-cylinder radius-top=".22" radius-bottom=".32" height=".52" position="0 -.10 0"
+                      material="color: #3ec5ef; opacity: .52; transparent: true"></a-cylinder>
+          <a-sphere radius=".085" position="-.31 .02 0" scale="1 1.8 1"
+                    material="color: #61dbf5; opacity: .6; transparent: true"></a-sphere>
+          <a-sphere radius=".085" position=".31 .02 0" scale="1 1.8 1"
+                    material="color: #61dbf5; opacity: .6; transparent: true"></a-sphere>
+        </a-entity>
+        <a-torus radius=".61" radius-tubular=".012" rotation="65 0 0" position="0 .23 0"
+                 material="color: #71edff; shader: flat; opacity: .58; transparent: true"
+                 animation="property: rotation; to: 65 360 0; dur: 14000; loop: true; easing: linear"></a-torus>
+        <a-torus radius=".50" radius-tubular=".008" rotation="-67 0 0" position="0 .23 0"
+                 material="color: #3ec3ff; shader: flat; opacity: .45; transparent: true"
+                 animation="property: rotation; to: -67 -360 0; dur: 18000; loop: true; easing: linear"></a-torus>
+        <a-cylinder radius=".36" height=".017" position="0 -.52 0"
+                    material="color: #33bcea; opacity: .4; transparent: true; shader: flat"></a-cylinder>
+      </a-entity>
+
+      <a-entity id="human" visible="false">
+        <a-sphere radius=".21" position="0 .70 0" color="#d9e9ef"
+                  material="metalness:.25; roughness:.55"></a-sphere>
+        <a-sphere radius=".017" position="-.074 .73 -.189" color="#193e52"></a-sphere>
+        <a-sphere radius=".017" position=".074 .73 -.189" color="#193e52"></a-sphere>
+        <a-cylinder radius-top=".20" radius-bottom=".31" height=".62" position="0 .19 0"
+                    color="#93d9ee" material="metalness:.5; roughness:.28"></a-cylinder>
+        <a-cylinder radius=".085" height=".48" position="-.35 .18 0" rotation="0 0 -14" color="#93d9ee"></a-cylinder>
+        <a-cylinder radius=".085" height=".48" position=".35 .18 0" rotation="0 0 14" color="#93d9ee"></a-cylinder>
+        <a-sphere radius=".11" position="0 .26 -.255" color="#c4f9ff"
+                  material="emissive: #1d8caa; emissiveIntensity: .4"></a-sphere>
+        <a-cylinder radius=".36" height=".015" position="0 -.5 0" color="#4cd4f1"></a-cylinder>
+      </a-entity>
+
+      <a-entity id="orb" visible="false" position="0 .22 0">
+        <a-sphere radius=".29" material="color: #72e7ff; emissive: #1a94bc; emissiveIntensity: .55; opacity:.88; transparent:true"
+                  animation="property: scale; dir: alternate; to: 1.12 1.12 1.12; dur: 1250; loop: true; easing: easeInOutSine"></a-sphere>
+        <a-torus radius=".43" radius-tubular=".018" rotation="30 0 0"
+                 material="color: #a4ecff; shader:flat"
+                 animation="property: rotation; to: 30 360 0; dur: 7000; loop:true; easing: linear"></a-torus>
+        <a-torus radius=".43" radius-tubular=".013" rotation="-40 90 0"
+                 material="color: #59a9ff; shader:flat"
+                 animation="property: rotation; to: -40 -270 0; dur: 9000; loop:true; easing: linear"></a-torus>
+      </a-entity>
+    </a-entity>
+
+    <a-entity id="nameplate" position="0 2.44 -2.25">
+      <a-plane width="2.7" height=".44" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
+      <a-text id="speech" value="Hola. Soy tu presencia virtual."
+              color="#ddfaff" width="2.52" align="center" wrap-count="32"
+              position="0 0 .018"></a-text>
+    </a-entity>
+
+    <!-- Botones interactivos espaciales -->
+    <a-entity position="0 .73 -1.93">
+      <a-box class="clickable" presencia-action="command: holo" position="-.70 0 0"
+             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
+      <a-text value="HOLOGRAMA" width="1.0" color="#ecfcff" align="center" position="-.70 0 .032"></a-text>
+      <a-box class="clickable" presencia-action="command: human" position="0 0 0"
+             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
+      <a-text value="HUMANOIDE" width="1.0" color="#ecfcff" align="center" position="0 0 .032"></a-text>
+      <a-box class="clickable" presencia-action="command: orb" position=".70 0 0"
+             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
+      <a-text value="ESFERA" width="1.0" color="#ecfcff" align="center" position=".70 0 .032"></a-text>
+      <a-box class="clickable" presencia-action="command: hello" position="0 -.34 0"
+             width=".85" height=".22" depth=".055" material="color: #133149"></a-box>
+      <a-text value="SALUDAR / VOZ" width="1.38" color="#caffee" align="center" position="0 -.34 .032"></a-text>
+    </a-entity>
+  </a-scene>
+
+  <script>
+    const replies = {
+      holo: 'Modo holograma activado.',
+      human: 'Modo humanoide activado.',
+      orb: 'Modo esfera activado.',
+      hello: '¡Hola! Soy Presencia, tu prototipo inmersivo. Todavía no tengo una IA conectada.'
+    };
+
+    window.presenciaAction = function (command) {
+      const mode = ['holo', 'human', 'orb'].includes(command) ? command : null;
+      if (mode) {
+        for (const id of ['holo', 'human', 'orb']) {
+          document.getElementById(id).setAttribute('visible', id === mode);
+        }
+      }
+      const msg = replies[command] || 'Comando no reconocido.';
+      document.getElementById('speech').setAttribute('value', msg);
+      document.getElementById('message').textContent = msg;
+      if (command === 'hello') {
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const phrase = new SpeechSynthesisUtterance(msg);
+            phrase.lang = 'es-AR';
+            phrase.rate = .93;
+            phrase.pitch = 1.05;
+            window.speechSynthesis.speak(phrase);
+          } catch (err) {
+            document.getElementById('message').textContent += ' (La voz no está disponible en este navegador.)';
+          }
+        } else {
+          document.getElementById('message').textContent += ' (La voz no está disponible en este navegador.)';
+        }
+      }
+    };
+
+    document.querySelector('a-scene').addEventListener('loaded', () => {
+      document.getElementById('message').textContent = 'Escena cargada. Entrá en AR y elegí un modo.';
+    });
+  </script>
+</body>
+</html>
