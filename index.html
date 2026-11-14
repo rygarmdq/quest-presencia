@@ -6,6 +6,8 @@
   <title>Presencia — Meta Quest 3 | Prototipo gratuito</title>
   <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.7.0/dist/aframe-extras.min.js"></script>
+  <!-- Vosk usa WebAssembly y un modelo descargable, no una API de transcripción de pago. -->
+  <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
   <style>
     :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
     body { margin: 0; background: #080e1a; }
@@ -107,21 +109,23 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.7 · API: USD 0</span>
+    <span class="badge">Prototipo v0.8 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
       <button onclick="presenciaAction('holo')">Holograma</button>
       <button onclick="presenciaAction('human')">Humanoide</button>
       <button onclick="presenciaAction('orb')">Esfera</button>
+      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ LOCAL (~40 MB)</button>
       <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
       <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
       <button onclick="presenciaAction('hello')">Probar voz 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.7: voz de prueba sin API de pago. Tocá MICROFONO y decí hola, esfera o ayuda.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.8: motor de voz local Vosk. Primero pulsá PREPARAR VOZ, después MICROFONO.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="voiceSupport">Comprobando compatibilidad...</p>
+    <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
     <p id="voiceState" aria-live="polite">Micrófono apagado</p>
     <p id="heardText">Escuchado: —</p>
     <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
@@ -131,7 +135,7 @@
       <button type="submit">Enviar</button>
     </form>
     <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
-    <p id="hint">Sin IA conversacional: respuestas y comandos programados. Gratis y sin clave API. El reconocimiento del navegador podría enviar audio a su proveedor. No compartas datos sensibles.</p>
+    <p id="hint">Sin IA conversacional: comandos programados. Vosk procesa el sonido localmente después de descargar el modelo, sin transmitir nuestras grabaciones desde la aplicación. No requiere clave API. No compartas datos sensibles mientras probamos compatibilidad.</p>
   </div>
 
   <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
@@ -274,6 +278,12 @@
               position="0 0 .018"></a-text>
     </a-entity>
 
+    <a-entity id="voskLoadPanel" position="1.03 1.92 -1.96">
+      <a-plane class="clickable" presencia-action="command: loadvosk" width=".86" height=".19"
+               material="color:#165675;side:double"></a-plane>
+      <a-text value="PREPARAR VOZ LOCAL" color="#deffff" width="1.22" align="center"
+              position="0 0 .012"></a-text>
+    </a-entity>
     <a-entity id="voiceCard" position="1.03 1.45 -1.96">
       <a-plane width=".87" height=".46" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
       <a-text id="xrVoiceState" value="MIC APAGADO" color="#aeffde" width="1.28"
@@ -449,12 +459,165 @@
       };
       return recognizer;
     }
-    function listen() {
-      if (!Recognition) {
-        micStatus('NO COMPATIBLE','SpeechRecognition ausente');
-        notice('Este navegador no admite reconocimiento Web Speech. Podés probar el comando escrito fuera de AR.');
+
+    // Modo alternativo sin Web Speech: reconocimiento en el visor con Vosk/WASM.
+    // Modelo español pequeño publicado con licencia Apache-2.0.
+    const VOSK_MODEL_URL = 'https://huggingface.co/Andesprit/vosk-small/resolve/main/vosk-model-small-es-0.42.tar.gz';
+    let localModel = null;
+    let modelPromise = null;
+    let localSession = null;
+    let localResultHandled = false;
+    let localPartial = '';
+    let localStopTimer = null;
+
+    async function prepareLocalSpeech() {
+      if (localModel) {
+        micStatus('VOZ LOCAL LISTA','Tocá MICROFONO para hablar');
         return;
       }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('MIC NO DISPONIBLE','El visor no ofrece getUserMedia');
+        notice('El navegador no proporciona acceso al micrófono. No puedo usar reconocimiento local.');
+        return;
+      }
+      if (!window.Vosk || typeof Vosk.createModel !== 'function') {
+        micStatus('MOTOR NO DISPONIBLE','No se cargó Vosk desde la biblioteca web');
+        notice('El motor Vosk no se pudo cargar. Revisá la conexión a internet y recargá la página.');
+        return;
+      }
+      if (modelPromise) {
+        micStatus('CARGANDO VOZ LOCAL','Esperá a que termine la descarga');
+        return modelPromise;
+      }
+      text('voskInfo','Descargando modelo gratuito de español (~40 MB). Puede consumir memoria del visor.');
+      micStatus('CARGANDO VOZ LOCAL','Modelo de español ~40 MB');
+      modelPromise = Vosk.createModel(VOSK_MODEL_URL);
+      try {
+        localModel = await modelPromise;
+        micStatus('VOZ LOCAL LISTA','Ahora tocá MICROFONO y hablá');
+        text('voskInfo','Motor español cargado en memoria. Ahora podés entrar a AR y pulsar MICROFONO.');
+        notice('Vosk está listo. Pulsá MICROFONO y decí hola, holograma o esfera.');
+      } catch(e) {
+        localModel = null;
+        modelPromise = null;
+        micStatus('ERROR VOZ LOCAL','No se descargó o inicializó el modelo');
+        notice('Falló la carga del motor gratuito. Podés probar el micrófono o usar comandos escritos.');
+        text('voskInfo','Error al cargar el modelo: '+String(e && (e.message || e.name) || 'fallo desconocido').slice(0,90));
+      }
+    }
+
+    function stopLocalSpeech({usePartial = false} = {}) {
+      const active = localSession;
+      if (!active) return;
+      localSession = null;
+      if (localStopTimer) {clearTimeout(localStopTimer);localStopTimer = null;}
+      if (active.processor) {
+        active.processor.onaudioprocess = null;
+        try {active.processor.disconnect();} catch(e){}
+      }
+      if (active.source) try {active.source.disconnect();} catch(e){}
+      if (active.gain) try {active.gain.disconnect();} catch(e){}
+      if (active.stream) active.stream.getTracks().forEach(t=>t.stop());
+      if (active.audioCtx) active.audioCtx.close().catch(()=>{});
+      const tail=localPartial.trim();
+      localPartial='';
+      if (usePartial && !localResultHandled && tail) {
+        localResultHandled=true;
+        processPhrase(tail);
+      }
+    }
+
+    async function startLocalSpeech() {
+      if (!localModel) {
+        micStatus('PRIMERO PREPARAR VOZ','Cargá el modelo antes de hablar');
+        notice('Primero tocá PREPARAR VOZ LOCAL y esperá a que termine la descarga del modelo español.');
+        return;
+      }
+      if (localSession) {stopLocalSpeech({usePartial:true});return;}
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('NO COMPATIBLE','getUserMedia ausente en visor');
+        return;
+      }
+      micStatus('SOLICITANDO MICROFONO','Aceptá el permiso del navegador');
+      let stream = null;
+      let ctx = null;
+      try {
+        // Captura iniciada por una pulsación; Web Speech no es necesario.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video:false,
+          audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+        });
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) throw new Error('AudioContext ausente');
+        // Si el dispositivo no permite 16 kHz, usamos su frecuencia nativa;
+        // Vosk recibe el sampleRate real de cada AudioBuffer.
+        try { ctx = new AC({sampleRate:16000}); }
+        catch(e) { ctx = new AC(); }
+        await ctx.resume();
+        const recognizer = new localModel.KaldiRecognizer(ctx.sampleRate);
+        const source = ctx.createMediaStreamSource(stream);
+        const processor = ctx.createScriptProcessor(4096,1,1);
+        const gain = ctx.createGain();
+        gain.gain.value=0;
+        source.connect(processor);
+        processor.connect(gain);
+        gain.connect(ctx.destination);
+
+        localSession={stream,audioCtx:ctx,source,processor,gain,recognizer};
+        localResultHandled=false;
+        localPartial='';
+        let lastMeter=0;
+        recognizer.on('partialresult', data=>{
+          if (!localSession || localResultHandled) return;
+          const p=data && data.result && data.result.partial || '';
+          localPartial=String(p);
+          const now=performance.now();
+          if (p && now-lastMeter>150) {
+            micStatus('ESCUCHANDO','Escucho: '+String(p).slice(0,34));
+            lastMeter=now;
+          }
+        });
+        recognizer.on('result', data=>{
+          if (!localSession || localResultHandled) return;
+          const phrase = data && data.result && data.result.text || '';
+          if (!String(phrase).trim()) return;
+          localResultHandled=true;
+          stopLocalSpeech();
+          micStatus('VOZ RECONOCIDA',String(phrase).slice(0,35));
+          processPhrase(phrase);
+        });
+        processor.onaudioprocess=ev=>{
+          if (!localSession || localResultHandled) return;
+          try {
+            recognizer.acceptWaveform(ev.inputBuffer);
+          } catch(e) {
+            stopLocalSpeech();
+            micStatus('ERROR DE AUDIO','No se pudo procesar el sonido');
+            notice('Vosk no pudo procesar el audio del micrófono.');
+          }
+        };
+        micStatus('ESCUCHANDO','Decí: hola, esfera o ayuda');
+        notice('Micrófono local encendido. Hablá ahora; termina automáticamente luego de 12 segundos.');
+        // Evita que una sesión quede escuchando indefinidamente.
+        localStopTimer=setTimeout(()=>{
+          if (!localSession) return;
+          stopLocalSpeech({usePartial:true});
+          if (!localResultHandled) {
+            micStatus('MIC APAGADO','No se detectaron palabras. Volvé a intentar');
+            notice('No pude transcribir palabras. Probá de nuevo, hablando claramente.');
+          }
+        },12000);
+      } catch(e) {
+        if (stream) stream.getTracks().forEach(t=>t.stop());
+        if (ctx) ctx.close().catch(()=>{});
+        localSession=null;
+        micStatus('MIC BLOQUEADO',String(e && (e.name || e.message) || 'error').slice(0,55));
+        notice('No pude activar el micrófono con Vosk. Revisá los permisos de Meta Quest Browser.');
+      }
+    }
+
+    function listen() {
+      if (!Recognition) { startLocalSpeech(); return; }
       if (listening || starting) {stopListen();return;}
       starting=true; gotResult=false;recognitionError='';
       if (hasTTS) speechSynthesis.cancel();
@@ -467,6 +630,7 @@
       }
     }
     function stopListen() {
+      if (localSession) stopLocalSpeech();
       if (recognizer && (listening || starting)) {
         try {recognizer.abort()} catch (e) {}
       }
@@ -491,6 +655,7 @@
       }
     }
     window.presenciaAction = function(command) {
+      if (command==='loadvosk') {prepareLocalSpeech();return;}
       if (command==='listen') {listen();return;}
       if (command==='stoplisten') {stopListen();return;}
       if (command==='testmic') {testMic();return;}
@@ -510,7 +675,7 @@
       reply(replies[command] || 'Orden no reconocida.',command==='hello');
     };
     const scene=document.querySelector('a-scene');
-    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.7 lista. Tocá MICROFONO y decí hola.'));
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.8 lista. Para hablar, primero prepará Vosk local.'));
     function exitVisible(v) {
       const button=document.getElementById('headExit');
       if (button) button.setAttribute('visible',!!v);
@@ -528,9 +693,9 @@
       if (cmd) {input.value='';processPhrase(cmd);}
     });
     text('voiceSupport',
-      (Recognition ? 'Reconocimiento: disponible para probar' : 'Reconocimiento: NO disponible')+
-      ' | '+(hasTTS ? 'Voz: disponible para probar' : 'Voz: NO disponible'));
-    micStatus('MIC APAGADO',Recognition?'Pulsa MICROFONO':'Usá texto fuera de AR');
+      (Recognition ? 'Web Speech disponible' : 'Web Speech ausente; alternativa: Vosk local')+
+      ' | '+(hasTTS ? 'Voz hablada: disponible' : 'Voz hablada: no disponible'));
+    micStatus('MIC APAGADO',Recognition?'Pulsa MICROFONO':'Primero PREPARAR VOZ LOCAL');
   </script>
 
 </body>
