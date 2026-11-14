@@ -38,7 +38,7 @@
 </head>
 <body>
   <div id="hud">
-    <span class="badge">Prototipo v0.3 · API: USD 0</span>
+    <span class="badge">Prototipo v0.4 · API: USD 0</span>
     <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
     <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
     <div class="actions">
@@ -48,7 +48,7 @@
       <button onclick="presenciaAction('hello')">Saludar 🔊</button>
       <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
     </div>
-    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.3: corregidos los tamaños de avatar y holograma; controles separados del personaje.</p>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.4: rostro visible, holograma refinado y controles más ordenados.</p>
     <div id="message" role="status">Preparando la escena 3D...</div>
     <p id="hint">Sin ChatGPT conectado, sin claves ni pagos. La voz depende del soporte de tu navegador.</p>
   </div>
@@ -82,51 +82,62 @@
     <!-- Avatar principal: a 2.2 metros, con las tres variantes del modo C. -->
     <a-entity id="presence" position="0 1.22 -2.2">
       <a-entity id="holo">
-        <a-entity position="0 0.35 0">
-          <a-sphere radius="0.21" position="0 0.38 0" segments-width="20" segments-height="14"
-                    material="color: #65e4ff; opacity: 0.70; transparent: true; emissive: #0e9ad8; emissiveIntensity: .45; metalness: .4; roughness: .22"></a-sphere>
-          <a-sphere radius="0.225" position="0 0.38 0" wireframe="true"
-                    material="color: #b2f7ff; wireframe: true; opacity: .58; transparent: true"></a-sphere>
-          <a-sphere radius=".022" position="-.07 .41 -.19" color="#e9ffff"></a-sphere>
-          <a-sphere radius=".022" position=".07 .41 -.19" color="#e9ffff"></a-sphere>
-          <a-cylinder radius=".255" height=".52" position="0 -.10 0"
-                      material="color: #0d97ce; opacity: .31; transparent: true; metalness: .35; roughness: .25"></a-cylinder>
-          <a-sphere radius=".085" position="-.31 .02 0" scale="1 1.8 1"
-                    material="color: #61dbf5; opacity: .6; transparent: true"></a-sphere>
-          <a-sphere radius=".085" position=".31 .02 0" scale="1 1.8 1"
-                    material="color: #61dbf5; opacity: .6; transparent: true"></a-sphere>
-        </a-entity>
-        <a-torus radius=".61" radius-tubular=".012" rotation="65 0 0" position="0 .23 0"
-                 material="color: #71edff; shader: flat; opacity: .58; transparent: true"
-                 animation="property: rotation; to: 65 360 0; dur: 14000; loop: true; easing: linear"></a-torus>
-        <a-torus radius=".50" radius-tubular=".008" rotation="-67 0 0" position="0 .23 0"
-                 material="color: #3ec3ff; shader: flat; opacity: .45; transparent: true"
-                 animation="property: rotation; to: -67 -360 0; dur: 18000; loop: true; easing: linear"></a-torus>
-        <a-cylinder radius=".36" height=".017" position="0 -.52 0"
-                    material="color: #33bcea; opacity: .4; transparent: true; shader: flat"></a-cylinder>
+        <!-- Busto holográfico de bajo costo: líneas finas, volumen reducido, rostro hacia +Z. -->
+        <a-sphere radius=".19" position="0 .70 0" segments-width="28" segments-height="20"
+                  material="color:#76dfff; emissive:#087ca9; emissiveIntensity:.42; opacity:.47; transparent:true; side:double; depthWrite:false"></a-sphere>
+        <a-sphere radius=".194" position="0 .70 0" segments-width="24" segments-height="16"
+                  material="color:#abf3ff; wireframe:true; opacity:.30; transparent:true; depthWrite:false"></a-sphere>
+        <a-sphere radius=".020" position="-.073 .728 .180"
+                  material="color:#cbfdff; emissive:#68dfff; emissiveIntensity:.75"></a-sphere>
+        <a-sphere radius=".020" position=".073 .728 .180"
+                  material="color:#cbfdff; emissive:#68dfff; emissiveIntensity:.75"></a-sphere>
+        <a-sphere radius=".018" position="0 .657 .185" color="#9cefff"></a-sphere>
+        <a-cylinder radius=".075" height=".13" position="0 .455 0"
+                    material="color:#3cbce3; opacity:.53; transparent:true"></a-cylinder>
+        <a-sphere radius=".27" position="0 .15 0" scale="1.22 .88 .65"
+                  material="color:#27b6e5; emissive:#167bb0; emissiveIntensity:.32; opacity:.30; transparent:true; depthWrite:false"></a-sphere>
+        <a-cylinder radius=".205" height=".40" position="0 .08 0"
+                    material="color:#1b9ed1; emissive:#156c99; emissiveIntensity:.27; opacity:.35; transparent:true; depthWrite:false"></a-cylinder>
+        <a-sphere radius=".07" position="-.275 .16 0" scale="1 1.7 .9"
+                  material="color:#48d4ed; opacity:.51; transparent:true"></a-sphere>
+        <a-sphere radius=".07" position=".275 .16 0" scale="1 1.7 .9"
+                  material="color:#48d4ed; opacity:.51; transparent:true"></a-sphere>
+        <a-sphere radius=".07" position="0 .115 .214"
+                  material="color:#adf8ff; emissive:#35b8de; emissiveIntensity:.65; opacity:.85; transparent:true"></a-sphere>
+        <!-- Pequeños aros discretos en lugar de anillos gigantes atravesando el torso. -->
+        <a-torus radius=".36" radius-tubular=".004" rotation="78 0 0" position="0 -.13 0"
+                 material="color:#64e8ff; shader:flat; opacity:.53; transparent:true"
+                 animation="property: rotation; to:78 360 0; dur:20000; loop:true; easing:linear"></a-torus>
+        <a-torus radius=".30" radius-tubular=".003" rotation="-73 0 0" position="0 .18 0"
+                 material="color:#8ceeff; shader:flat; opacity:.30; transparent:true"
+                 animation="property: rotation; to:-73 -360 0; dur:26000; loop:true; easing:linear"></a-torus>
       </a-entity>
 
-      <a-entity id="human" visible="false">
+      <a-entity id="human" visible="false"
+                animation="property: rotation; from:0 -3 0; to:0 3 0; dir:alternate; dur:3600; loop:true; easing:easeInOutSine">
         <!-- Humanoide reconocible (figura androide estilizada, no fotorrealista). -->
-        <!-- Cabeza, cabello, orejas y rostro: el frente está orientado hacia el usuario. -->
+        <!-- Cabeza y rostro: la cámara ve el lado +Z. -->
         <a-sphere radius=".205" position="0 .61 0"
                   material="color:#e6c9ae; roughness:.85"></a-sphere>
         <a-sphere radius=".204" position="0 .70 .045" scale="1 0.62 1"
                   material="color:#273b51; roughness:.75"></a-sphere>
         <a-sphere radius=".05" position="-.202 .58 0" color="#e6c9ae"></a-sphere>
         <a-sphere radius=".05" position=".202 .58 0" color="#e6c9ae"></a-sphere>
-        <a-sphere radius=".042" position="-.076 .628 -.181" color="#f7fdff"></a-sphere>
-        <a-sphere radius=".042" position=".076 .628 -.181" color="#f7fdff"></a-sphere>
-        <a-sphere radius=".020" position="-.076 .628 -.218" color="#244b62"></a-sphere>
-        <a-sphere radius=".020" position=".076 .628 -.218" color="#244b62"></a-sphere>
-        <a-sphere radius=".028" position="0 .55 -.206" color="#ddae94"></a-sphere>
-        <a-box width=".084" height=".010" depth=".012" position="0 .493 -.190" color="#995b61"></a-box>
+        <a-sphere radius=".042" position="-.076 .628 .186" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".042" position=".076 .628 .186" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".020" position="-.076 .628 .224" color="#244b62"></a-sphere>
+        <a-sphere radius=".020" position=".076 .628 .224" color="#244b62"></a-sphere>
+        <a-sphere radius=".028" position="0 .55 .200" color="#ddae94"></a-sphere>
+        <a-box width=".084" height=".010" depth=".012" position="0 .493 .186" color="#995b61"></a-box>
         <a-cylinder radius=".074" height=".12" position="0 .36 0" color="#d6b4a0"></a-cylinder>
+        <!-- Cejas y detalles suaves para que el rostro sea visible en Quest. -->
+        <a-box width=".085" height=".014" depth=".012" position="-.076 .680 .183" color="#294658"></a-box>
+        <a-box width=".085" height=".014" depth=".012" position=".076 .680 .183" color="#294658"></a-box>
 
         <!-- Chaqueta tecnológica, hombros, brazos y manos. -->
         <a-cylinder radius=".235" height=".53" position="0 .045 0"
                     material="color:#2d5274; roughness:.68; metalness:.2"></a-cylinder>
-        <a-box width=".08" height=".44" depth=".018" position="0 .05 -.251" color="#63c6e3"></a-box>
+        <a-box width=".08" height=".44" depth=".018" position="0 .05 .246" color="#63c6e3"></a-box>
         <a-sphere radius=".135" position="-.28 .21 0" color="#3f6e8d"></a-sphere>
         <a-sphere radius=".135" position=".28 .21 0" color="#3f6e8d"></a-sphere>
         <a-cylinder radius=".080" height=".38" position="-.34 -.045 0"
@@ -136,7 +147,7 @@
         <a-sphere radius=".072" position="-.385 -.27 0" color="#d9b8a1"></a-sphere>
         <a-sphere radius=".072" position=".385 -.27 0" color="#d9b8a1"></a-sphere>
         <a-cylinder radius=".255" height=".10" position="0 -.28 0" color="#203f5c"></a-cylinder>
-        <a-sphere radius=".095" position="0 .08 -.253"
+        <a-sphere radius=".095" position="0 .08 .237"
                   material="color:#9eeaff; emissive:#328da9; emissiveIntensity:.75"></a-sphere>
 
         <!-- Piernas separadas y botas: la figura se distingue del torso. -->
@@ -164,31 +175,35 @@
       </a-entity>
     </a-entity>
 
-    <a-entity id="nameplate" position="0 2.20 -2.25">
-      <a-plane width="2.7" height=".44" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
+    <a-entity id="nameplate" position="0 2.54 -2.25">
+      <a-plane width="2.25" height=".36" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
       <a-text id="speech" value="Hola. Soy tu presencia virtual."
-              color="#ddfaff" width="2.52" align="center" wrap-count="32"
+              color="#ddfaff" width="2.03" align="center" wrap-count="32"
               position="0 0 .018"></a-text>
     </a-entity>
 
-    <!-- Botones interactivos espaciales -->
-    <a-entity id="controls" position="-1.15 1.15 -1.93" scale=".82 .82 .82">
-      <a-box class="clickable" presencia-action="command: holo" position="-.70 0 0"
-             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
-      <a-text value="HOLOGRAMA" width="1.0" color="#ecfcff" align="center" position="-.70 0 .032"></a-text>
-      <a-box class="clickable" presencia-action="command: human" position="0 0 0"
-             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
-      <a-text value="HUMANOIDE" width="1.0" color="#ecfcff" align="center" position="0 0 .032"></a-text>
-      <a-box class="clickable" presencia-action="command: orb" position=".70 0 0"
-             width=".61" height=".22" depth=".055" material="color: #133149"></a-box>
-      <a-text value="ESFERA" width="1.0" color="#ecfcff" align="center" position=".70 0 .032"></a-text>
-      <a-box class="clickable" presencia-action="command: hello" position="0 -.34 0"
-             width=".85" height=".22" depth=".055" material="color: #133149"></a-box>
-      <a-text value="SALUDAR / VOZ" width="1.38" color="#caffee" align="center" position="0 -.34 .032"></a-text>
-      <a-box class="clickable" presencia-action="command: exit" position="0 -.68 0"
-             width=".98" height=".25" depth=".06" material="color: #a52e43"></a-box>
-      <a-text value="SALIR AR  X" width="1.58" color="#ffffff"
-              align="center" position="0 -.68 .038"></a-text>
+    <!-- Panel vertical compacto a la izquierda, sin superposición con el avatar. -->
+    <a-entity id="controls" position="-1.00 1.48 -1.91" scale=".95 .95 .95">
+      <a-box class="clickable" presencia-action="command: holo" position="0 .35 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="HOLOGRAMA" width="1" color="#ecfcff" align="center"
+              position="0 .35 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: human" position="0 .06 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="HUMANOIDE" width="1" color="#ecfcff" align="center"
+              position="0 .06 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: orb" position="0 -.23 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="ESFERA" width="1" color="#ecfcff" align="center"
+              position="0 -.23 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: hello" position="0 -.55 0"
+             width=".65" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="SALUDAR / VOZ" width="1.10" color="#caffee" align="center"
+              position="0 -.55 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: exit" position="0 -.90 0"
+             width=".65" height=".22" depth=".05" material="color:#963646"></a-box>
+      <a-text value="SALIR AR  X" width="1.1" color="#ffffff" align="center"
+              position="0 -.90 .033"></a-text>
     </a-entity>
   </a-scene>
 
@@ -255,7 +270,7 @@
     const scene = document.querySelector('a-scene');
     scene.addEventListener('loaded', () => {
       document.getElementById('message').textContent =
-        'PRESENCIA v0.3 lista. Elegí un modo. Los controles están a la izquierda.';
+        'PRESENCIA v0.4 lista. Elegí un modo. Los controles están a la izquierda.';
     });
     function updateExitVisibility(inXR) {
       const button = document.getElementById('headExit');
