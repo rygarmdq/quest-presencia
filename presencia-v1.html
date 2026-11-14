@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presencia — Meta Quest 3 | Prototipo gratuito</title>
+  <script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.7.0/dist/aframe-extras.min.js"></script>
+  <!-- Vosk usa WebAssembly y un modelo descargable, no una API de transcripción de pago. -->
+  <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    body { margin: 0; background: #080e1a; }
+    #hud { position: fixed; top: 16px; left: 16px; z-index: 10; max-width: 370px;
+      padding: 15px 18px; border-radius: 17px; background: rgba(8,19,34,.88);
+      border: 1px solid rgba(114,220,255,.34); color:#e6faff;
+      box-shadow: 0 8px 50px rgba(0,0,0,.2); backdrop-filter: blur(10px); }
+    h1 { font-size: 1.13rem; margin: 0 0 4px; letter-spacing: .02em; }
+    p { margin: 5px 0 10px; font-size: .85rem; line-height: 1.4; color: #c4dbe7; }
+    .badge { display: inline-block; border: 1px solid #36b6aa; border-radius: 100px;
+      padding: 2px 9px; font-size: .72rem; margin-bottom: 8px; color:#93f2d1; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    button { border: 1px solid #42759c; background: #163454; color: #edfaff;
+      border-radius: 10px; padding: 8px 10px; font-size: .79rem; cursor: pointer; }
+    button:hover { background: #28608a; }
+    #message { margin-top: 9px; min-height: 22px; color:#9deee2; font-size: .8rem; }
+    #hint { margin-bottom: 0; font-size: .74rem; color: #90acbc; }
+    @media (max-width: 580px) { #hud { right: 16px; max-width: none; } }
+  </style>
+  <script>
+    // PRESENCIA: conservar la escala propia del GLB y centrarlo en coordenadas locales.
+    // Nunca reemplazar mesh.scale con setScalar(ratio): podría borrar la escala raíz del autor.
+    AFRAME.registerComponent('presencia-model-fit', {
+      init: function () {
+        const el = this.el;
+        el.addEventListener('model-loaded', function () {
+          try {
+            const model = el.getObject3D('mesh');
+            if (!model || !model.parent) throw new Error('Modelo 3D incompleto');
+            model.updateWorldMatrix(true, true);
+            const originalBounds = new THREE.Box3().setFromObject(model);
+            const originalHeight = originalBounds.getSize(new THREE.Vector3()).y;
+            if (!isFinite(originalHeight) || originalHeight <= 0.001) {
+              throw new Error('Altura inválida del GLB');
+            }
+
+            // Un tamaño cómodo: 1,35 m de alto, a unos 2,55 m del usuario.
+            // Usamos multiplicación para respetar cualquier escala que traiga el modelo.
+            const targetHeight = 1.35;
+            const correction = targetHeight / originalHeight;
+            model.scale.multiplyScalar(correction);
+            model.updateWorldMatrix(true, true);
+
+            // Box3 ofrece coordenadas globales. Convertimos a coordenadas del padre
+            // antes de desplazar la malla, evitando acercarla accidentalmente a la cámara.
+            const scaledBounds = new THREE.Box3().setFromObject(model);
+            const currentCenterWorld = scaledBounds.getCenter(new THREE.Vector3());
+            const desiredCenterWorld = el.object3D.getWorldPosition(new THREE.Vector3());
+            desiredCenterWorld.y = 0.82; // pies a ~15 cm del piso (modo room-scale)
+            desiredCenterWorld.z -= 0.35;
+            const parent = model.parent;
+            const currentLocal = parent.worldToLocal(currentCenterWorld.clone());
+            const desiredLocal = parent.worldToLocal(desiredCenterWorld.clone());
+            model.position.add(desiredLocal.sub(currentLocal));
+            model.updateWorldMatrix(true, true);
+
+            // Verificación adicional: si algo sale mal, mantener el muñeco básico.
+            const finalBounds = new THREE.Box3().setFromObject(model);
+            const finalHeight = finalBounds.getSize(new THREE.Vector3()).y;
+            const finalCenter = finalBounds.getCenter(new THREE.Vector3());
+            if (!isFinite(finalHeight) || finalHeight < 0.5 || finalHeight > 2.0
+                || !isFinite(finalCenter.z)) {
+              throw new Error('Escalado fuera del rango seguro');
+            }
+
+            const fallback = document.getElementById('humanFallback');
+            if (fallback) fallback.setAttribute('visible', false);
+            el.setAttribute('visible', true);
+            document.getElementById('message').textContent =
+              'Robot 3D listo (altura aprox. ' + finalHeight.toFixed(2) + ' m).';
+          } catch (err) {
+            el.setAttribute('visible', false);
+            const fallback = document.getElementById('humanFallback');
+            if (fallback) fallback.setAttribute('visible', true);
+            document.getElementById('message').textContent =
+              'Problema al ajustar el robot 3D: se conserva el humanoide básico.';
+          }
+        });
+        el.addEventListener('model-error', function () {
+          el.setAttribute('visible', false);
+          const fallback = document.getElementById('humanFallback');
+          if (fallback) fallback.setAttribute('visible', true);
+          document.getElementById('message').textContent =
+            'No se descargó el modelo 3D. Humanoide básico disponible.';
+        });
+      }
+    });
+
+    AFRAME.registerComponent('presencia-action', {
+      schema: { command: { type: 'string' } },
+      init: function () {
+        const self = this;
+        this.el.addEventListener('click', function () { window.presenciaAction(self.data.command); });
+        this.el.addEventListener('mouseenter', function () { self.el.setAttribute('material', 'color', '#275b7a'); });
+        this.el.addEventListener('mouseleave', function () { self.el.setAttribute('material', 'color', '#133149'); });
+      }
+    });
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <span class="badge">Prototipo v1.0 BETA · API: USD 0</span>
+    <h1>PRESENCIA <span style="color:#79ddf5">/ Quest 3</span></h1>
+    <p>Una primera presencia virtual. En tus Quest 3, pulsá <strong>Enter AR</strong> para verla en tu habitación. Elegí un aspecto tocando los botones virtuales con el controlador o la mirada.</p>
+    <div class="actions">
+      <button onclick="presenciaAction('holo')">Holograma</button>
+      <button onclick="presenciaAction('human')">Humanoide</button>
+      <button onclick="presenciaAction('orb')">Esfera</button>
+      <button id="loadOfflineFlat" onclick="presenciaAction('loadvosk')">📥 PREPARAR VOZ + AUDIO</button>
+      <button id="listenFlat" onclick="presenciaAction('listen')">🎤 ESCUCHAR</button>
+      <button onclick="presenciaAction('stoplisten')">Detener micrófono</button>
+      <button onclick="presenciaAction('beep')">🔔 TEST SONIDO</button>
+      <button onclick="presenciaAction('testvoice')">🔊 PROBAR RESPUESTA</button>
+      <button onclick="presenciaAction('exit')" style="background:#81323b;border-color:#ef737e">SALIR AR ✕</button>
+    </div>
+    <p style="font-size:.73rem;color:#a9f1d8">Novedad v0.9.1: corregida la carga de voz. Probá primero TEST SONIDO, luego PREPARAR VOZ + AUDIO.</p>
+    <div id="message" role="status">Preparando la escena 3D...</div>
+    <p id="voiceSupport">Comprobando compatibilidad...</p>
+    <p id="voskInfo" style="font-size:.75rem;color:#9deee2">Vosk no iniciado. La primera carga descarga un modelo de español (~40 MB), con consumo de memoria adicional. Preferible prepararlo antes de entrar en AR.</p>
+    <p id="ttsInfo" style="font-size:.75rem;color:#caffee" aria-live="polite">Salida de voz: sin preparar. Audio en español latinoamericano (meSpeak).</p>
+    <p id="voiceState" aria-live="polite">Micrófono apagado</p>
+    <p id="heardText">Escuchado: —</p>
+    <form id="textFallback" autocomplete="off" style="display:flex;gap:6px">
+      <input id="typedCommand" aria-label="Comando escrito" maxlength="160"
+             placeholder="Escribí: hola, esfera, ayuda..."
+             style="flex:1;min-width:0;padding:8px;border-radius:8px;background:#0b2032;color:white;border:1px solid #47728a">
+      <button type="submit">Enviar</button>
+    </form>
+    <button onclick="presenciaAction('testmic')" style="margin-top:7px">Comprobar micrófono</button>
+    <p id="hint">Sin IA conversacional: comandos programados. Vosk escucha y meSpeak genera respuestas localmente una vez descargados. Sin clave API. La voz de meSpeak es robótica. No ingreses información sensible.</p>
+  </div>
+
+  <a-scene xr-mode-ui="XRMode: xr" renderer="antialias: true; colorManagement: true"
+           loading-screen="dotsColor: #73dffb; backgroundColor: #070d1a">
+    <!-- El cielo existe solo en la vista plana/VR. En AR se oculta para dejar ver el passthrough. -->
+    <a-sky color="#0c172b" hide-on-enter-ar></a-sky>
+    <a-entity light="type: ambient; color: #b2e5ff; intensity: 0.9"></a-entity>
+    <a-entity light="type: point; color: #37d7ff; intensity: 1.6; distance: 6" position="1 2 -1"></a-entity>
+
+    <a-entity id="rig">
+      <a-camera position="0 1.6 0" look-controls wasd-controls>
+        <a-entity cursor="fuse: true; fuseTimeout: 1300"
+                  raycaster="objects: .clickable; far: 8"
+                  position="0 0 -0.5"
+                  geometry="primitive: ring; radiusInner: 0.005; radiusOuter: 0.009"
+                  material="color: #8defff; shader: flat; opacity: 0.65"></a-entity>
+        <!-- Botón de emergencia junto al campo de visión durante AR/VR. -->
+        <a-entity id="headExit" position=".41 -.25 -.93" visible="false">
+          <a-plane class="clickable" presencia-action="command: exit"
+                   width=".23" height=".095" material="color: #a52e43; shader: flat; side: double"></a-plane>
+          <a-text value="SALIR AR" align="center" width=".51"
+                  color="#ffffff" position="0 0 .009"></a-text>
+        </a-entity>
+      </a-camera>
+      <a-entity laser-controls="hand: left" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
+      <a-entity laser-controls="hand: right" raycaster="objects: .clickable; far: 6" line="color: #6fceff"></a-entity>
+    </a-entity>
+
+    <!-- Avatar principal: a 2.2 metros, con las tres variantes del modo C. -->
+    <a-entity id="presence" position="0 1.22 -2.2">
+      <a-entity id="holo">
+        <!-- Busto holográfico de bajo costo: líneas finas, volumen reducido, rostro hacia +Z. -->
+        <a-sphere radius=".19" position="0 .70 0" segments-width="28" segments-height="20"
+                  material="color:#76dfff; emissive:#087ca9; emissiveIntensity:.42; opacity:.47; transparent:true; side:double; depthWrite:false"></a-sphere>
+        <a-sphere radius=".194" position="0 .70 0" segments-width="24" segments-height="16"
+                  material="color:#abf3ff; wireframe:true; opacity:.30; transparent:true; depthWrite:false"></a-sphere>
+        <a-sphere radius=".020" position="-.073 .728 .180"
+                  material="color:#cbfdff; emissive:#68dfff; emissiveIntensity:.75"></a-sphere>
+        <a-sphere radius=".020" position=".073 .728 .180"
+                  material="color:#cbfdff; emissive:#68dfff; emissiveIntensity:.75"></a-sphere>
+        <a-sphere radius=".018" position="0 .657 .185" color="#9cefff"></a-sphere>
+        <a-cylinder radius=".075" height=".13" position="0 .455 0"
+                    material="color:#3cbce3; opacity:.53; transparent:true"></a-cylinder>
+        <a-sphere radius=".27" position="0 .15 0" scale="1.22 .88 .65"
+                  material="color:#27b6e5; emissive:#167bb0; emissiveIntensity:.32; opacity:.30; transparent:true; depthWrite:false"></a-sphere>
+        <a-cylinder radius=".205" height=".40" position="0 .08 0"
+                    material="color:#1b9ed1; emissive:#156c99; emissiveIntensity:.27; opacity:.35; transparent:true; depthWrite:false"></a-cylinder>
+        <a-sphere radius=".07" position="-.275 .16 0" scale="1 1.7 .9"
+                  material="color:#48d4ed; opacity:.51; transparent:true"></a-sphere>
+        <a-sphere radius=".07" position=".275 .16 0" scale="1 1.7 .9"
+                  material="color:#48d4ed; opacity:.51; transparent:true"></a-sphere>
+        <a-sphere radius=".07" position="0 .115 .214"
+                  material="color:#adf8ff; emissive:#35b8de; emissiveIntensity:.65; opacity:.85; transparent:true"></a-sphere>
+        <!-- Pequeños aros discretos en lugar de anillos gigantes atravesando el torso. -->
+        <a-torus radius=".36" radius-tubular=".004" rotation="78 0 0" position="0 -.13 0"
+                 material="color:#64e8ff; shader:flat; opacity:.53; transparent:true"
+                 animation="property: rotation; to:78 360 0; dur:20000; loop:true; easing:linear"></a-torus>
+        <a-torus radius=".30" radius-tubular=".003" rotation="-73 0 0" position="0 .18 0"
+                 material="color:#8ceeff; shader:flat; opacity:.30; transparent:true"
+                 animation="property: rotation; to:-73 -360 0; dur:26000; loop:true; easing:linear"></a-torus>
+      </a-entity>
+
+      <a-entity id="human" visible="false"
+                animation="property: rotation; from:0 -3 0; to:0 3 0; dir:alternate; dur:3600; loop:true; easing:easeInOutSine">
+        <a-entity id="humanModel" visible="false"
+                  gltf-model="url(https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb)"
+                  animation-mixer="clip: Idle; loop: repeat; timeScale: .75"
+                  presencia-model-fit></a-entity>
+        <a-entity id="humanFallback">
+
+        <!-- Humanoide reconocible (figura androide estilizada, no fotorrealista). -->
+        <!-- Cabeza y rostro: la cámara ve el lado +Z. -->
+        <a-sphere radius=".205" position="0 .61 0"
+                  material="color:#e6c9ae; roughness:.85"></a-sphere>
+        <a-sphere radius=".204" position="0 .70 .045" scale="1 0.62 1"
+                  material="color:#273b51; roughness:.75"></a-sphere>
+        <a-sphere radius=".05" position="-.202 .58 0" color="#e6c9ae"></a-sphere>
+        <a-sphere radius=".05" position=".202 .58 0" color="#e6c9ae"></a-sphere>
+        <a-sphere radius=".042" position="-.076 .628 .186" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".042" position=".076 .628 .186" color="#f7fdff"></a-sphere>
+        <a-sphere radius=".020" position="-.076 .628 .224" color="#244b62"></a-sphere>
+        <a-sphere radius=".020" position=".076 .628 .224" color="#244b62"></a-sphere>
+        <a-sphere radius=".028" position="0 .55 .200" color="#ddae94"></a-sphere>
+        <a-box width=".084" height=".010" depth=".012" position="0 .493 .186" color="#995b61"></a-box>
+        <a-cylinder radius=".074" height=".12" position="0 .36 0" color="#d6b4a0"></a-cylinder>
+        <!-- Cejas y detalles suaves para que el rostro sea visible en Quest. -->
+        <a-box width=".085" height=".014" depth=".012" position="-.076 .680 .183" color="#294658"></a-box>
+        <a-box width=".085" height=".014" depth=".012" position=".076 .680 .183" color="#294658"></a-box>
+
+        <!-- Chaqueta tecnológica, hombros, brazos y manos. -->
+        <a-cylinder radius=".235" height=".53" position="0 .045 0"
+                    material="color:#2d5274; roughness:.68; metalness:.2"></a-cylinder>
+        <a-box width=".08" height=".44" depth=".018" position="0 .05 .246" color="#63c6e3"></a-box>
+        <a-sphere radius=".135" position="-.28 .21 0" color="#3f6e8d"></a-sphere>
+        <a-sphere radius=".135" position=".28 .21 0" color="#3f6e8d"></a-sphere>
+        <a-cylinder radius=".080" height=".38" position="-.34 -.045 0"
+                    rotation="0 0 -12" color="#3f6e8d"></a-cylinder>
+        <a-cylinder radius=".080" height=".38" position=".34 -.045 0"
+                    rotation="0 0 12" color="#3f6e8d"></a-cylinder>
+        <a-sphere radius=".072" position="-.385 -.27 0" color="#d9b8a1"></a-sphere>
+        <a-sphere radius=".072" position=".385 -.27 0" color="#d9b8a1"></a-sphere>
+        <a-cylinder radius=".255" height=".10" position="0 -.28 0" color="#203f5c"></a-cylinder>
+        <a-sphere radius=".095" position="0 .08 .237"
+                  material="color:#9eeaff; emissive:#328da9; emissiveIntensity:.75"></a-sphere>
+
+        <!-- Piernas separadas y botas: la figura se distingue del torso. -->
+        <a-cylinder radius=".105" height=".43" position="-.13 -.54 0"
+                    rotation="0 0 -3" color="#25384f"></a-cylinder>
+        <a-cylinder radius=".105" height=".43" position=".13 -.54 0"
+                    rotation="0 0 3" color="#25384f"></a-cylinder>
+        <a-sphere radius=".11" position="-.14 -.79 0" color="#496786"></a-sphere>
+        <a-sphere radius=".11" position=".14 -.79 0" color="#496786"></a-sphere>
+        <a-cylinder radius=".09" height=".37" position="-.14 -.99 0" color="#2d425a"></a-cylinder>
+        <a-cylinder radius=".09" height=".37" position=".14 -.99 0" color="#2d425a"></a-cylinder>
+        <a-box width=".22" height=".11" depth=".34" position="-.14 -1.21 -.065" color="#182b3d"></a-box>
+        <a-box width=".22" height=".11" depth=".34" position=".14 -1.21 -.065" color="#182b3d"></a-box>
+              </a-entity>
+      </a-entity>
+
+      <a-entity id="orb" visible="false" position="0 .22 0">
+        <a-sphere radius=".29" material="color: #72e7ff; emissive: #1a94bc; emissiveIntensity: .55; opacity:.88; transparent:true"
+                  animation="property: scale; dir: alternate; to: 1.12 1.12 1.12; dur: 1250; loop: true; easing: easeInOutSine"></a-sphere>
+        <a-torus radius=".43" radius-tubular=".018" rotation="30 0 0"
+                 material="color: #a4ecff; shader:flat"
+                 animation="property: rotation; to: 30 360 0; dur: 7000; loop:true; easing: linear"></a-torus>
+        <a-torus radius=".43" radius-tubular=".013" rotation="-40 90 0"
+                 material="color: #59a9ff; shader:flat"
+                 animation="property: rotation; to: -40 -270 0; dur: 9000; loop:true; easing: linear"></a-torus>
+      </a-entity>
+    </a-entity>
+
+    <!-- Indicador visible cuando habla el personaje -->
+    <a-torus id="voicePulse" visible="false" position="0 0.9 -1.65" radius=".18"
+             radius-tubular=".012" material="color:#92fff3;shader:flat;opacity:.7;transparent:true"
+             animation="property:scale;from:.8 .8 .8;to:1.3 1.3 1.3;dir:alternate;dur:430;loop:true"></a-torus>
+    <a-entity id="nameplate" position="0 2.54 -2.25">
+      <a-plane width="2.25" height=".36" color="#0b253c" opacity=".75" material="transparent:true; side:double"></a-plane>
+      <a-text id="speech" value="Hola. Soy tu presencia virtual."
+              color="#ddfaff" width="2.03" align="center" wrap-count="32"
+              position="0 0 .018"></a-text>
+    </a-entity>
+
+    <a-entity id="voskLoadPanel" position="1.03 1.92 -1.96">
+      <a-plane class="clickable" presencia-action="command: loadvosk" width=".86" height=".19"
+               material="color:#165675;side:double"></a-plane>
+      <a-text value="PREPARAR VOZ + AUDIO" color="#deffff" width="1.25" align="center"
+              position="0 0 .012"></a-text>
+    </a-entity>
+    <a-entity id="soundTestPanel" position="1.03 2.48 -1.96">
+      <a-plane class="clickable" presencia-action="command: beep" width=".86" height=".19"
+               material="color:#30617b;side:double"></a-plane>
+      <a-text value="TEST SONIDO" color="#f0fffa" width="1.25" align="center"
+              position="0 0 .012"></a-text>
+    </a-entity>
+    <a-entity id="voiceTestPanel" position="1.03 2.21 -1.96">
+      <a-plane class="clickable" presencia-action="command: testvoice" width=".86" height=".19"
+               material="color:#205d50;side:double"></a-plane>
+      <a-text value="PROBAR RESPUESTA" color="#f0fffa" width="1.25" align="center"
+              position="0 0 .012"></a-text>
+    </a-entity>
+    <a-entity id="voiceCard" position="1.03 1.45 -1.96">
+      <a-plane width=".87" height=".60" material="color:#0b2838;opacity:.83;transparent:true;side:double"></a-plane>
+      <a-text id="xrVoiceState" value="MIC APAGADO" color="#aeffde" width="1.28"
+              align="center" position="0 .11 .01" wrap-count="20"></a-text>
+      <a-text id="xrVoiceDetail" value="Pulsa MICROFONO" color="#ffffff" width="1.23"
+              align="center" position="0 -.05 .01" wrap-count="21"></a-text>
+      <a-text id="xrTtsState" value="AUDIO: SIN PREPARAR" color="#ffdcb0" width="1.26"
+              align="center" position="0 -.24 .012" wrap-count="22"></a-text>
+    </a-entity>
+    <!-- Panel vertical compacto a la izquierda, sin superposición con el avatar. -->
+    <a-entity id="controls" position="-1.00 1.48 -1.91" scale=".95 .95 .95">
+      <a-box class="clickable" presencia-action="command: holo" position="0 .35 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="HOLOGRAMA" width="1" color="#ecfcff" align="center"
+              position="0 .35 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: human" position="0 .06 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="HUMANOIDE" width="1" color="#ecfcff" align="center"
+              position="0 .06 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: orb" position="0 -.23 0"
+             width=".58" height=".22" depth=".05" material="color:#133149"></a-box>
+      <a-text value="ESFERA" width="1" color="#ecfcff" align="center"
+              position="0 -.23 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: listen" position="0 -.55 0"
+             width=".65" height=".22" depth=".05" material="color:#1e607c"></a-box>
+      <a-text value="MICROFONO" width="1.10" color="#caffee" align="center"
+              position="0 -.55 .033"></a-text>
+      <a-box class="clickable" presencia-action="command: exit" position="0 -.90 0"
+             width=".65" height=".22" depth=".05" material="color:#963646"></a-box>
+      <a-text value="SALIR AR  X" width="1.1" color="#ffffff" align="center"
+              position="0 -.90 .033"></a-text>
+    </a-entity>
+  </a-scene>
+
+  <script>
+    // PRESENCIA 0.7. Ordenes preprogramadas, sin OpenAI API ni audio almacenado por la página.
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const hasTTS = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
+    let recognizer = null, listening = false, starting = false, gotResult = false, recognitionError = '';
+    const replies = {
+      holo: 'Modo holograma activado.',
+      human: 'Modo humanoide activado.',
+      orb: 'Modo esfera activado.',
+      hello: 'Hola. Soy PRESENCIA. Podemos probar comandos por voz; todavía no hay una IA conversacional conectada.'
+    };
+    function text(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    function notice(msg) {
+      text('message', msg);
+      const spatial = document.getElementById('speech');
+      if (spatial) spatial.setAttribute('value', msg.slice(0, 120));
+    }
+    function micStatus(main, sub) {
+      text('voiceState', main + (sub ? ' — ' + sub : ''));
+      const a = document.getElementById('xrVoiceState');
+      const b = document.getElementById('xrVoiceDetail');
+      if (a) a.setAttribute('value', main.slice(0, 25));
+      if (b) b.setAttribute('value', (sub || '').slice(0, 56));
+    }
+    function changeMode(id) {
+      for (const mode of ['holo','human','orb']) {
+        document.getElementById(mode).setAttribute('visible',mode === id);
+      }
+    }
+    // Motor de voz de salida. Quest no tiene SpeechSynthesis; meSpeak produce WAV sin API.
+    const MESPEAK_BASE='https://cdn.jsdelivr.net/gh/foxdog-studios/meSpeak@master/';
+    const MESPEAK_CONFIG=MESPEAK_BASE+'mespeak_config.json';
+    const MESPEAK_VOICE=MESPEAK_BASE+'voices/es-la.json';
+    let voiceAudioContext=null, voiceBufferSource=null, voiceReady=false, voiceLoading=null;
+    let voiceSequence=0, voiceLastError='';
+    function ttsStatus(msg) {
+      text('ttsInfo','Salida de voz: '+msg);
+      const a=document.getElementById('xrTtsState');
+      if (a) a.setAttribute('value',('AUDIO: '+msg).slice(0,60));
+    }
+    function lightSpeaking(active) {
+      const glow=document.getElementById('voicePulse');
+      if (glow) glow.setAttribute('visible',!!active);
+    }
+    // Inicializar/desbloquear en el click, antes de iniciar cualquier descarga.
+    function unlockSpeaker() {
+      const AC=window.AudioContext || window.webkitAudioContext;
+      if (!AC) {
+        ttsStatus('AudioContext no disponible');
+        return false;
+      }
+      try {
+        if (!voiceAudioContext) voiceAudioContext=new AC();
+        voiceAudioContext.resume().catch(()=>{});
+        const silent=voiceAudioContext.createBuffer(1,1,voiceAudioContext.sampleRate);
+        const node=voiceAudioContext.createBufferSource();
+        node.buffer=silent; node.connect(voiceAudioContext.destination);
+        node.start(0);
+        return true;
+      } catch(e) {
+        ttsStatus('No se pudo desbloquear audio');
+        return false;
+      }
+    }
+    function fetchJson(url) {
+      return fetch(url).then(res=>{
+        if (!res.ok) throw Error('HTTP '+res.status);
+        return res.json();
+      });
+    }
+    function loadSpeechScript(url, timeout=14000) {
+      return new Promise((resolve,reject)=>{
+        const tag=document.createElement('script');
+        let settled=false;
+        const timer=setTimeout(()=>{
+          if (settled) return;
+          settled=true;
+          tag.remove();
+          reject(Error('Tiempo agotado descargando el motor'));
+        },timeout);
+        tag.onload=()=>{
+          if (settled) return;
+          settled=true;clearTimeout(timer);resolve();
+        };
+        tag.onerror=()=>{
+          if (settled) return;
+          settled=true;clearTimeout(timer);reject(Error('No se pudo descargar el script'));
+        };
+        tag.src=url;
+        document.head.appendChild(tag);
+      });
+    }
+
+    // El motor meSpeak v1.9.6 espera URL en loadConfig/loadVoice, NO objetos JSON.
+    // En v0.9 le pasábamos objetos: eso dejaba el motor sin configuración.
+    async function waitForVoice(check, timeoutMs, what) {
+      const started=Date.now();
+      while (Date.now()-started<timeoutMs) {
+        if (check()) return true;
+        await new Promise(resolve=>setTimeout(resolve,150));
+      }
+      throw new Error('Tiempo agotado: '+what);
+    }
+    async function prepareVoiceOutput() {
+      if (voiceReady) {ttsStatus('ESPAÑOL LISTO');return true;}
+      if (voiceLoading) return voiceLoading;
+      voiceLastError='';
+      ttsStatus('cargando motor TTS...');
+      voiceLoading=(async()=>{
+        if (!window.meSpeak || typeof window.meSpeak.speak!=='function') {
+          try {
+            await loadSpeechScript(MESPEAK_BASE+'mespeak.js',26000);
+          } catch(first) {
+            try {
+              await loadSpeechScript('https://cdn.jsdelivr.net/gh/btopro/mespeak@master/mespeak.js',26000);
+            } catch(second) {
+              throw new Error('No descarga mespeak.js (red/CDN).');
+            }
+          }
+        }
+        if (!window.meSpeak || typeof window.meSpeak.speak!=='function') {
+          throw new Error('mespeak.js no pudo inicializarse.');
+        }
+        ttsStatus('cargando configuración...');
+        // La API del motor v1.9.6 realiza su propia solicitud XHR.
+        if (!meSpeak.isConfigLoaded()) {
+          meSpeak.loadConfig(MESPEAK_CONFIG);
+          await waitForVoice(()=>meSpeak.isConfigLoaded(),18000,'configuración mespeak_config.json');
+        }
+        ttsStatus('cargando voz es-la...');
+        if (!meSpeak.isVoiceLoaded('es-la')) {
+          let voiceFailure='';
+          meSpeak.loadVoice(MESPEAK_VOICE,(ok,info)=>{
+            if (!ok) voiceFailure=String(info||'error de archivo de voz');
+          });
+          await waitForVoice(()=>{
+            if (voiceFailure) throw new Error('Voz española: '+voiceFailure);
+            return meSpeak.isVoiceLoaded('es-la');
+          },15000,'archivo de voz es-la.json');
+        }
+        if (typeof meSpeak.setDefaultVoice==='function') meSpeak.setDefaultVoice('es-la');
+        voiceReady=true;
+        voiceLastError='';
+        ttsStatus('ESPAÑOL LISTO · PROBÁ RESPUESTA');
+        return true;
+      })().catch(err=>{
+        voiceReady=false;
+        voiceLastError=String(err && (err.message||err) || 'causa no informada');
+        ttsStatus('ERROR: '+voiceLastError.slice(0,64));
+        text('ttsInfo','Error real del motor de voz: '+voiceLastError+'. Probá TEST SONIDO para aislar el problema.');
+        return false;
+      }).finally(()=>{
+        voiceLoading=null;
+      });
+      return voiceLoading;
+    }
+    function testSpeaker() {
+      if (!unlockSpeaker() || !voiceAudioContext) {
+        notice('El visor no admite reproducir sonido con Web Audio o bloqueó el contexto.');
+        return;
+      }
+      try {
+        const ctx=voiceAudioContext;
+        const osc=ctx.createOscillator();
+        const amp=ctx.createGain();
+        osc.type='sine';
+        osc.frequency.setValueAtTime(440,ctx.currentTime);
+        osc.frequency.setValueAtTime(660,ctx.currentTime+0.16);
+        amp.gain.setValueAtTime(0.0001,ctx.currentTime);
+        amp.gain.exponentialRampToValueAtTime(0.08,ctx.currentTime+0.02);
+        amp.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.4);
+        osc.connect(amp);amp.connect(ctx.destination);
+        osc.start(ctx.currentTime+0.01);
+        osc.stop(ctx.currentTime+0.42);
+        osc.onended=()=>{osc.disconnect();amp.disconnect();};
+        ttsStatus('TEST TONO ENVIADO · estado '+ctx.state);
+        notice('Se envió un tono de prueba. Si no lo escuchás, revisá el volumen de las Quest.');
+      } catch(e) {
+        ttsStatus('ERROR TEST SONIDO: '+String(e.message||e).slice(0,42));
+        notice('No se pudo generar el sonido de prueba.');
+      }
+    }
+    function stopVoiceOutput() {
+      voiceSequence++;
+      if (voiceBufferSource) {
+        try {voiceBufferSource.stop()} catch(e){}
+        try {voiceBufferSource.disconnect()} catch(e){}
+      }
+      voiceBufferSource=null;
+      lightSpeaking(false);
+      if (hasTTS) {try{speechSynthesis.cancel()}catch(e){}}
+    }
+    async function speakOffline(message) {
+      if (!voiceReady) {
+        const ok=await prepareVoiceOutput();
+        if (!ok) {
+          ttsStatus('ERROR: '+(voiceLastError||'motor no inicializado').slice(0,60));
+          return;
+        }
+      }
+      if (!voiceAudioContext && !unlockSpeaker()) {
+        ttsStatus('necesita un toque en PROBAR RESPUESTA');
+        return;
+      }
+      const seq=++voiceSequence;
+      try {
+        await voiceAudioContext.resume();
+        if (seq!==voiceSequence) return;
+        const raw=meSpeak.speak(String(message).slice(0,250),{
+          rawdata:true,voice:'es-la',speed:150,pitch:48,amplitude:90
+        });
+        if (!raw) throw Error('No se generó el archivo WAV');
+        let arr;
+        if (raw instanceof ArrayBuffer) arr=raw;
+        else if (ArrayBuffer.isView(raw)) arr=raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength);
+        else throw Error('meSpeak devolvió un audio no compatible');
+        const decoded=await voiceAudioContext.decodeAudioData(arr.slice(0));
+        if (seq!==voiceSequence) return;
+        const source=voiceAudioContext.createBufferSource();
+        source.buffer=decoded;
+        source.connect(voiceAudioContext.destination);
+        voiceBufferSource=source;
+        source.onended=()=>{
+          if (voiceBufferSource===source) {
+            voiceBufferSource=null;
+            lightSpeaking(false);
+            ttsStatus('ESPAÑOL LISTO · REPRODUCCIÓN FINALIZADA');
+          }
+        };
+        lightSpeaking(true);
+        ttsStatus('HABLANDO EN ESPAÑOL');
+        source.start(0);
+      } catch(e) {
+        lightSpeaking(false);
+        ttsStatus('ERROR AL REPRODUCIR · '+String(e.message||e).slice(0,40));
+      }
+    }
+    function speak(msg) {
+      stopVoiceOutput();
+      if (hasTTS) {
+        try {
+          const u=new SpeechSynthesisUtterance(msg);
+          u.lang='es-AR';u.rate=.96;
+          u.onstart=()=>{lightSpeaking(true);ttsStatus('HABLANDO');};
+          u.onend=()=>{lightSpeaking(false);ttsStatus('LISTO');};
+          u.onerror=()=>{lightSpeaking(false);speakOffline(msg);};
+          speechSynthesis.speak(u);
+          return;
+        } catch(e) {}
+      }
+      speakOffline(msg);
+    }
+    function reply(msg, audible = true) {
+      notice(msg);
+      if (audible) speak(msg);
+    }
+    function normalized(value) {
+      return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/ +/g,' ').trim();
+    }
+    function processPhrase(value) {
+      const phrase = String(value || '').trim().slice(0, 160);
+      if (!phrase) return;
+      text('heardText', 'Escuchado: '+phrase);
+      const q = normalized(phrase);
+      let msg;
+      if (/\b(holograma|holografico)\b/.test(q)) {
+        changeMode('holo'); msg=replies.holo;
+      } else if (/\b(humanoide|robot|personaje)\b/.test(q)) {
+        changeMode('human'); msg=replies.human;
+      } else if (/\b(esfera|orbita)\b/.test(q)) {
+        changeMode('orb'); msg=replies.orb;
+      } else if (/\b(salir de realidad mixta|salir ar|salir de ar)\b/.test(q)) {
+        window.presenciaAction('exit'); return;
+      } else if (/\b(ayuda|comandos|que podes hacer|que puedes hacer)\b/.test(q)) {
+        msg='Decí hola, humanoide, esfera, holograma, qué hora es o salir de realidad mixta.';
+      } else if (/\b(que hora|hora es)\b/.test(q)) {
+        msg='Son las '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
+            ' según el reloj de tu dispositivo.';
+      } else if (/\b(como estas|como va)\b/.test(q)) {
+        msg='Estoy listo para probar nuestra experiencia inmersiva.';
+      } else if (/\b(hola|buenas|buen dia)\b/.test(q)) {
+        msg='¡Hola! Me alegra poder acompañarte en realidad mixta.';
+      } else if (/\b(quien sos|quien eres)\b/.test(q)) {
+        msg='Soy PRESENCIA, un prototipo visual con respuestas programadas, sin una IA conectada todavía.';
+      } else {
+        msg='Escuché: '+phrase+'. Por ahora entiendo unas pocas órdenes. Decí ayuda para conocerlas.';
+      }
+      reply(msg);
+    }
+    function errorMessage(code) {
+      const known = {
+        'not-allowed':'Permiso denegado. Habilitá el micrófono en el navegador.',
+        'service-not-allowed':'El navegador no permite usar este servicio.',
+        'audio-capture':'No se encontró un micrófono utilizable.',
+        'no-speech':'No detecté palabras. Volvé a intentarlo.',
+        'network':'Servicio de reconocimiento no accesible o sin conexión.',
+        'language-not-supported':'El español no está disponible en este navegador.',
+        'aborted':'Escucha cancelada.'
+      };
+      return known[code] || ('Error de reconocimiento: '+(code || 'desconocido'));
+    }
+    function getRecognizer() {
+      if (!Recognition) return null;
+      if (recognizer) return recognizer;
+      recognizer = new Recognition();
+      recognizer.lang = 'es-AR';
+      recognizer.continuous = false;
+      recognizer.interimResults = false;
+      recognizer.maxAlternatives = 1;
+      recognizer.onstart = () => {
+        listening=true; starting=false; gotResult=false; recognitionError='';
+        micStatus('ESCUCHANDO','Decí hola, esfera o ayuda');
+      };
+      recognizer.onspeechstart = () => micStatus('ESCUCHANDO','Detecté voz...');
+      recognizer.onresult = event => {
+        if (gotResult) return;
+        const result = event.results && event.results[0];
+        const heard = result && result[0] && result[0].transcript;
+        if (!heard) return;
+        gotResult=true;
+        micStatus('RECONOCIDO',String(heard).slice(0,30));
+        try {recognizer.stop()} catch (e) {}
+        processPhrase(heard);
+      };
+      recognizer.onerror = event => {
+        recognitionError=errorMessage(event.error);
+        listening=false;starting=false;
+        micStatus('ERROR DE MICROFONO',recognitionError);
+        notice(recognitionError);
+      };
+      recognizer.onend = () => {
+        listening=false;starting=false;
+        if (recognitionError) micStatus('ERROR DE MICROFONO',recognitionError);
+        else if (gotResult) micStatus('MIC APAGADO','Para otra frase, tocá MICROFONO');
+        else micStatus('MIC APAGADO','Sin resultado; tocá MICROFONO otra vez');
+      };
+      return recognizer;
+    }
+
+    // Modo alternativo sin Web Speech: reconocimiento en el visor con Vosk/WASM.
+    // Modelo español pequeño publicado con licencia Apache-2.0.
+    const VOSK_MODEL_URL = 'https://huggingface.co/Andesprit/vosk-small/resolve/main/vosk-model-small-es-0.42.tar.gz';
+    let localModel = null;
+    let modelPromise = null;
+    let localSession = null;
+    let localResultHandled = false;
+    let localPartial = '';
+    let localStopTimer = null;
+
+    async function prepareLocalSpeech() {
+      if (localModel) {
+        micStatus('VOZ LOCAL LISTA','Tocá MICROFONO para hablar');
+        return;
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('MIC NO DISPONIBLE','El visor no ofrece getUserMedia');
+        notice('El navegador no proporciona acceso al micrófono. No puedo usar reconocimiento local.');
+        return;
+      }
+      if (!window.Vosk || typeof Vosk.createModel !== 'function') {
+        micStatus('MOTOR NO DISPONIBLE','No se cargó Vosk desde la biblioteca web');
+        notice('El motor Vosk no se pudo cargar. Revisá la conexión a internet y recargá la página.');
+        return;
+      }
+      if (modelPromise) {
+        micStatus('CARGANDO VOZ LOCAL','Esperá a que termine la descarga');
+        return modelPromise;
+      }
+      text('voskInfo','Descargando modelo gratuito de español (~40 MB). Puede consumir memoria del visor.');
+      micStatus('CARGANDO VOZ LOCAL','Modelo de español ~40 MB');
+      modelPromise = Vosk.createModel(VOSK_MODEL_URL);
+      try {
+        localModel = await modelPromise;
+        micStatus('VOZ LOCAL LISTA','Ahora tocá MICROFONO y hablá');
+        text('voskInfo','Motor español cargado en memoria. Ahora podés entrar a AR y pulsar MICROFONO.');
+        notice('Vosk está listo. Pulsá MICROFONO y decí hola, holograma o esfera.');
+      } catch(e) {
+        localModel = null;
+        modelPromise = null;
+        micStatus('ERROR VOZ LOCAL','No se descargó o inicializó el modelo');
+        notice('Falló la carga del motor gratuito. Podés probar el micrófono o usar comandos escritos.');
+        text('voskInfo','Error al cargar el modelo: '+String(e && (e.message || e.name) || 'fallo desconocido').slice(0,90));
+      }
+    }
+
+    function stopLocalSpeech({usePartial = false} = {}) {
+      const active = localSession;
+      if (!active) return;
+      localSession = null;
+      if (localStopTimer) {clearTimeout(localStopTimer);localStopTimer = null;}
+      if (active.processor) {
+        active.processor.onaudioprocess = null;
+        try {active.processor.disconnect();} catch(e){}
+      }
+      if (active.source) try {active.source.disconnect();} catch(e){}
+      if (active.gain) try {active.gain.disconnect();} catch(e){}
+      if (active.stream) active.stream.getTracks().forEach(t=>t.stop());
+      if (active.audioCtx) active.audioCtx.close().catch(()=>{});
+      const tail=localPartial.trim();
+      localPartial='';
+      if (usePartial && !localResultHandled && tail) {
+        localResultHandled=true;
+        processPhrase(tail);
+      }
+    }
+
+    async function startLocalSpeech() {
+      if (!localModel) {
+        micStatus('PRIMERO PREPARAR VOZ','Cargá el modelo antes de hablar');
+        notice('Primero tocá PREPARAR VOZ LOCAL y esperá a que termine la descarga del modelo español.');
+        return;
+      }
+      if (localSession) {stopLocalSpeech({usePartial:true});return;}
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('NO COMPATIBLE','getUserMedia ausente en visor');
+        return;
+      }
+      micStatus('SOLICITANDO MICROFONO','Aceptá el permiso del navegador');
+      let stream = null;
+      let ctx = null;
+      try {
+        // Captura iniciada por una pulsación; Web Speech no es necesario.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video:false,
+          audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+        });
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) throw new Error('AudioContext ausente');
+        // Si el dispositivo no permite 16 kHz, usamos su frecuencia nativa;
+        // Vosk recibe el sampleRate real de cada AudioBuffer.
+        try { ctx = new AC({sampleRate:16000}); }
+        catch(e) { ctx = new AC(); }
+        await ctx.resume();
+        const recognizer = new localModel.KaldiRecognizer(ctx.sampleRate);
+        const source = ctx.createMediaStreamSource(stream);
+        const processor = ctx.createScriptProcessor(4096,1,1);
+        const gain = ctx.createGain();
+        gain.gain.value=0;
+        source.connect(processor);
+        processor.connect(gain);
+        gain.connect(ctx.destination);
+
+        localSession={stream,audioCtx:ctx,source,processor,gain,recognizer};
+        localResultHandled=false;
+        localPartial='';
+        let lastMeter=0;
+        recognizer.on('partialresult', data=>{
+          if (!localSession || localResultHandled) return;
+          const p=data && data.result && data.result.partial || '';
+          localPartial=String(p);
+          const now=performance.now();
+          if (p && now-lastMeter>150) {
+            micStatus('ESCUCHANDO','Escucho: '+String(p).slice(0,34));
+            lastMeter=now;
+          }
+        });
+        recognizer.on('result', data=>{
+          if (!localSession || localResultHandled) return;
+          const phrase = data && data.result && data.result.text || '';
+          if (!String(phrase).trim()) return;
+          localResultHandled=true;
+          stopLocalSpeech();
+          micStatus('VOZ RECONOCIDA',String(phrase).slice(0,35));
+          processPhrase(phrase);
+        });
+        processor.onaudioprocess=ev=>{
+          if (!localSession || localResultHandled) return;
+          try {
+            recognizer.acceptWaveform(ev.inputBuffer);
+          } catch(e) {
+            stopLocalSpeech();
+            micStatus('ERROR DE AUDIO','No se pudo procesar el sonido');
+            notice('Vosk no pudo procesar el audio del micrófono.');
+          }
+        };
+        micStatus('ESCUCHANDO','Decí: hola, esfera o ayuda');
+        notice('Micrófono local encendido. Hablá ahora; termina automáticamente luego de 12 segundos.');
+        // Evita que una sesión quede escuchando indefinidamente.
+        localStopTimer=setTimeout(()=>{
+          if (!localSession) return;
+          stopLocalSpeech({usePartial:true});
+          if (!localResultHandled) {
+            micStatus('MIC APAGADO','No se detectaron palabras. Volvé a intentar');
+            notice('No pude transcribir palabras. Probá de nuevo, hablando claramente.');
+          }
+        },12000);
+      } catch(e) {
+        if (stream) stream.getTracks().forEach(t=>t.stop());
+        if (ctx) ctx.close().catch(()=>{});
+        localSession=null;
+        micStatus('MIC BLOQUEADO',String(e && (e.name || e.message) || 'error').slice(0,55));
+        notice('No pude activar el micrófono con Vosk. Revisá los permisos de Meta Quest Browser.');
+      }
+    }
+
+    function listen() {
+      if (!Recognition) { startLocalSpeech(); return; }
+      if (listening || starting) {stopListen();return;}
+      starting=true; gotResult=false;recognitionError='';
+      if (hasTTS) speechSynthesis.cancel();
+      micStatus('INICIANDO','Aceptá el permiso de micrófono');
+      // Llamada directa desde el click para respetar el gesto del usuario.
+      try {getRecognizer().start()} catch (e) {
+        starting=false;
+        micStatus('ERROR DE INICIO', e.name || 'No disponible');
+        notice('No pude iniciar la escucha. Probá Comprobar micrófono.');
+      }
+    }
+    function stopListen() {
+      if (localSession) stopLocalSpeech();
+      if (recognizer && (listening || starting)) {
+        try {recognizer.abort()} catch (e) {}
+      }
+      listening=false; starting=false;
+      micStatus('MIC APAGADO','Detenido');
+    }
+    async function testMic() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micStatus('NO COMPATIBLE','getUserMedia ausente');
+        notice('El navegador no dispone de acceso al micrófono.');
+        return;
+      }
+      micStatus('COMPROBANDO','Aceptá el permiso de micrófono');
+      try {
+        const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+        stream.getTracks().forEach(t=>t.stop());
+        micStatus('MIC AUTORIZADO','Captura OK, no garantiza transcripción');
+        notice('El micrófono puede capturar audio. Ahora probá ESCUCHAR para comprobar el reconocimiento de voz.');
+      } catch(e) {
+        micStatus('MIC BLOQUEADO',e.name || 'Error');
+        notice('No pude acceder al micrófono. Comprobá los permisos del navegador.');
+      }
+    }
+    window.presenciaAction = function(command) {
+      if (command==='loadvosk') {
+        unlockSpeaker();
+        prepareVoiceOutput();
+        prepareLocalSpeech();
+        return;
+      }
+      if (command==='beep') {testSpeaker();return;}
+      if (command==='testvoice') {
+        unlockSpeaker();
+        reply('Hola. Ahora puedo hablarte en español, desde tu entorno de realidad mixta.',true);
+        return;
+      }
+      if (command==='listen') {listen();return;}
+      if (command==='stoplisten') {stopListen();return;}
+      if (command==='testmic') {testMic();return;}
+      if (command==='exit') {
+        stopListen();
+        stopVoiceOutput();
+        notice('Saliendo de realidad mixta...');
+        const scene=document.querySelector('a-scene');
+        try {
+          const session=scene.renderer && scene.renderer.xr && scene.renderer.xr.getSession();
+          if (session) session.end().catch(()=>scene.exitVR());
+          else if (scene.exitVR) scene.exitVR();
+        } catch(e) {notice('Usá el botón Meta para salir.');}
+        return;
+      }
+      if (['holo','human','orb'].includes(command)) changeMode(command);
+      reply(replies[command] || 'Orden no reconocida.',command==='hello');
+    };
+    const scene=document.querySelector('a-scene');
+    scene.addEventListener('loaded',()=>notice('PRESENCIA v0.9.1 lista. Primero TEST SONIDO; luego PREPARAR VOZ + AUDIO.'));
+    function exitVisible(v) {
+      const button=document.getElementById('headExit');
+      if (button) button.setAttribute('visible',!!v);
+    }
+    scene.addEventListener('enter-vr',()=>exitVisible(true));
+    scene.addEventListener('enter-ar',()=>exitVisible(true));
+    scene.addEventListener('exit-vr',()=>{
+      stopListen();stopVoiceOutput();exitVisible(false);notice('Saliste de AR. Podés volver a entrar.');
+    });
+    scene.addEventListener('exit-ar',()=>exitVisible(false));
+    document.getElementById('textFallback').addEventListener('submit',e=>{
+      e.preventDefault();
+      const input=document.getElementById('typedCommand');
+      const cmd=input.value.trim();
+      if (cmd) {input.value='';processPhrase(cmd);}
+    });
+    text('voiceSupport',
+      (Recognition ? 'Web Speech disponible' : 'Web Speech ausente; alternativa: Vosk local')+
+      ' | '+(hasTTS ? 'Voz hablada: disponible' : 'Voz hablada: no disponible'));
+    micStatus('MIC APAGADO',Recognition?'Pulsa MICROFONO':'Primero PREPARAR VOZ LOCAL');
+  </script>
+
+</body>
+</html>
