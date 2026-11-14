@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRESENCIA v1.2 — Guía para conectar IA gratuita</title>
+<style>
+:root{font-family:system-ui,Arial,sans-serif;color-scheme:dark}
+body{margin:0;padding:24px;background:linear-gradient(140deg,#07101d,#103348);color:#e4f9ff}
+main{max-width:800px;margin:auto}
+h1{font-size:1.75rem} h2{font-size:1.15rem;color:#8cecd8}
+section{background:#10263b;border:1px solid #2c6079;border-radius:16px;padding:20px;margin:16px 0}
+p,li{line-height:1.55} strong{color:#9ff3df}
+code{font-size:.93rem}pre{white-space:pre-wrap;word-break:break-all;background:#051522;color:#b1ffee;padding:14px;border-radius:11px;border:1px solid #32647c;overflow-x:auto}
+button{background:#1a7690;color:white;border:1px solid #5accd4;border-radius:8px;padding:6px 10px;cursor:pointer;float:right}
+small{color:#b5d3d8}a{color:#99f2f2}
+.warning{background:#38291f;border-color:#caa067}
+</style></head><body><main>
+<h1>🧠 PRESENCIA v1.2 — conectar IA gratuita</h1>
+<p>El modelo de IA se ejecuta en <strong>tu computadora Windows</strong> mediante Ollama. Las Quest 3 siguen utilizando Vosk para escucharte y Piper para hablar. No hay cargos por API.</p>
+<p><strong>La PC debe permanecer encendida</strong>, conectada a Internet, con Ollama y dos ventanas de PowerShell abiertas durante la prueba. El primer modelo ocupa aproximadamente 1 GB de descarga. Usamos <code>qwen2.5:1.5b</code> para empezar con pocos recursos; no es el mismo modelo que ChatGPT.</p>
+<section><h2>Paso 1 — Instalar tres programas en la computadora</h2>
+<p>En Windows presioná <strong>Win + X → Terminal/PowerShell</strong>. Pegá cada comando y presioná Enter. Si ya tenés alguno instalado, omitilo. Es probable que Windows te pida confirmar permisos.</p>
+<p><strong>Ollama</strong> — ejecuta la IA:</p>
+<pre>winget install -e --id Ollama.Ollama</pre>
+<p><strong>Python 3</strong> — ejecuta nuestro puente seguro:</p>
+<pre>winget install -e --id Python.Python.3.13</pre>
+<p><strong>cloudflared</strong> — crea una dirección HTTPS temporal gratuita:</p>
+<pre>winget install -e --id Cloudflare.cloudflared</pre>
+<p>Cerrá y volvé a abrir PowerShell después de instalar.</p></section>
+<section><h2>Paso 2 — Descargar el modelo gratuito</h2>
+<p>Con Ollama abierto, pegá:</p><pre>ollama pull qwen2.5:1.5b</pre>
+<p>Cuando termine, hacé una prueba en la PC:</p><pre>ollama run qwen2.5:1.5b</pre>
+<p>Escribí <code>Hola</code> y comprobá que responda. Para salir de esa conversación, escribí <code>/bye</code>. No cierres Ollama.</p></section>
+<section><h2>Paso 3 — Iniciar el puente de PRESENCIA</h2>
+<p>Abrí PowerShell en una carpeta cómoda. Estos comandos crean una carpeta nueva y descargan el archivo desde <strong>tu propio GitHub</strong>:</p>
+<pre>mkdir PRESENCIA
+cd PRESENCIA
+curl.exe -L "https://raw.githubusercontent.com/rygarmdq/quest-presencia/main/presencia_puente.py" -o presencia_puente.py
+py presencia_puente.py</pre>
+<p>Si <code>mkdir PRESENCIA</code> responde que la carpeta ya existe, usá solamente <code>cd PRESENCIA</code>. El programa mostrará una <strong>CLAVE SECRETA</strong> en la pantalla. No compartas esa clave ni cierres la ventana.</p>
+<p><small>Si <code>py</code> no funciona, probá <code>python presencia_puente.py</code>. La clave es distinta cada vez que reiniciás el programa.</small></p>
+</section>
+<section><h2>Paso 4 — Crear la conexión HTTPS</h2>
+<p>Abrí una <strong>segunda ventana</strong> de PowerShell (sin cerrar la anterior) y ejecutá:</p>
+<pre>cloudflared tunnel --url http://localhost:8765</pre>
+<p>Buscá una dirección parecida a <code>https://algo-aleatorio.trycloudflare.com</code> y copiala. Cambia cada vez que reiniciás cloudflared.</p></section>
+<section><h2>Paso 5 — Hablar con PRESENCIA en las Meta Quest 3</h2>
+<ol>
+<li>Abrí <a href="./presencia-v1-2.html?version=120">PRESENCIA v1.2 BETA</a> en las Quest 3.</li>
+<li>En <strong>IA LOCAL</strong>, pegá la dirección HTTPS del paso 4 y la clave del paso 3.</li>
+<li>Presioná <strong>CONECTAR IA</strong>. Debería aparecer <strong>IA CONECTADA</strong>.</li>
+<li>Presioná <strong>PREPARAR VOSK + PIPER</strong> y esperá que estén listos.</li>
+<li>Entrá en realidad mixta, presioná <strong>MICROFONO</strong> y preguntá: «¿Por qué el cielo es azul?».</li>
+<li>Después preguntá: «¿Me lo explicás con un ejemplo?». La IA debería recordar el contexto inmediato.</li>
+</ol>
+<p>Los comandos <strong>esfera, holograma y humanoide</strong> siguen funcionando sin la IA.</p>
+</section>
+<section class="warning"><h2>Privacidad y seguridad</h2>
+<p>La IA funciona localmente, pero los mensajes de la aplicación pasan por un <strong>túnel HTTPS de Cloudflare</strong> antes de llegar a tu PC. El puente está protegido con una clave temporal y solo responde al origen web del proyecto. <strong>No publiques la clave</strong>, no abras el puerto de Ollama en el router y no uses datos confidenciales en el prototipo.</p>
+<p>Cloudflare Quick Tunnel es una solución temporal de pruebas, no para producción. Al cerrar cloudflared o el puente, termina la conexión; eso es lo recomendable después de cada sesión.</p></section>
+<section><h2>Si aparece un error</h2>
+<p><strong>IA SIN CONEXIÓN:</strong> comprobá URL HTTPS y clave. Si reiniciaste el túnel, copiá la URL nueva.</p>
+<p><strong>Modelo no encontrado:</strong> volvé al paso 2.</p>
+<p><strong>La IA tarda:</strong> el modelo puede estar funcionando solo con CPU. Dejá que termine; respuestas breves ayudan.</p>
+<p><strong>Micrófono y voz siguen funcionando, pero sin IA:</strong> no se pierde lo anterior. Podés volver a <a href="./presencia-v1-1.html?version=110">PRESENCIA v1.1 estable</a>.</p>
+</section>
+</main></body></html>
